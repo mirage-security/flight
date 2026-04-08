@@ -1,8 +1,19 @@
 import SwiftUI
+import AppKit
 
 @main
 struct FlightApp: App {
     @State private var state = AppState()
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [state] _ in
+            state.stopAllAgents()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

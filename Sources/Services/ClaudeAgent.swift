@@ -5,87 +5,82 @@ final class ClaudeAgent {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
     private var readTask: Task<Void, Never>?
-    private var stderrReadTask: Task<Void, Never>?
     private var logHandle: FileHandle?
+    private var directory: String = ""
+    private var logFile: URL?
+    private var pendingMessages: [String] = []
 
     private(set) var isRunning = false
+    private(set) var isBusy = false
+    private(set) var sessionID: String?
     var onMessage: ((AgentMessage) -> Void)?
+    var onSessionID: ((String) -> Void)?
+    var onBusyChanged: ((Bool) -> Void)?
 
-    func start(in directory: String, logFile: URL? = nil) throws {
-        if let logFile {
+    func start(in directory: String, resumeSessionID: String? = nil, logFile: URL? = nil) throws {
+        self.directory = directory
+        self.logFile = logFile
+        self.sessionID = resumeSessionID
+
+        if logHandle == nil, let logFile {
             FileManager.default.createFile(atPath: logFile.path, contents: nil)
             logHandle = try FileHandle(forWritingTo: logFile)
             logHandle?.seekToEndOfFile()
-            log("=== Flight agent started at \(Date()) ===")
-            log("=== directory: \(directory) ===")
-        }
-        let process = Process()
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [
-            "claude",
-            "-p",
-            "--output-format", "stream-json",
-            "--input-format", "stream-json",
-            "--verbose",
-            "--dangerously-skip-permissions",
-            "--settings", "{\"sandbox\":{\"enabled\":true}}"
-        ]
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        self.process = process
-        self.stdinPipe = stdinPipe
-        self.stdoutPipe = stdoutPipe
-
-        process.terminationHandler = { [weak self] _ in
-            Task { @MainActor in
-                self?.isRunning = false
-            }
         }
 
-        try process.run()
+        log("=== Flight agent started at \(Date()) ===")
+        log("=== directory: \(directory) ===")
+
         isRunning = true
-
-        startReading()
     }
 
     func send(message: String) {
-        guard let stdinPipe, isRunning else { return }
+        // Add user message to the chat locally immediately
+        let userMessage = AgentMessage(role: .user, content: .text(message))
+        onMessage?(userMessage)
 
-        let payload: [String: Any] = [
-            "type": "user",
-            "message": [
-                "role": "user",
-                "content": message
+        if isBusy {
+            // Queue it — will fire when current turn completes
+            log("=== QUEUED message (agent busy): \(message) ===")
+            pendingMessages.append(message)
+            return
+        }
+
+        spawnTurn(message: message)
+    }
+
+    func interrupt() {
+        guard let process, process.isRunning else { return }
+        log("=== SIGINT sent ===")
+        process.interrupt()
+    }
+
+    func respondToControlRequest(requestID: String, allow: Bool) {
+        guard let stdinPipe else { return }
+
+        let response: [String: Any] = [
+            "type": "control_response",
+            "request_id": requestID,
+            "response": [
+                "allowed": allow
             ]
         ]
 
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              var jsonString = String(data: data, encoding: .utf8) else { return }
-
-        jsonString += "\n"
-
-        if let messageData = jsonString.data(using: .utf8) {
-            log(">>> STDIN: \(jsonString.trimmingCharacters(in: .newlines))")
-            stdinPipe.fileHandleForWriting.write(messageData)
+        if let data = try? JSONSerialization.data(withJSONObject: response),
+           var jsonString = String(data: data, encoding: .utf8) {
+            jsonString += "\n"
+            if let messageData = jsonString.data(using: .utf8) {
+                log(">>> STDIN (control_response): \(jsonString.trimmingCharacters(in: .newlines))")
+                stdinPipe.fileHandleForWriting.write(messageData)
+            }
         }
-
-        // Add user message to the chat locally
-        let userMessage = AgentMessage(role: .user, content: .text(message))
-        onMessage?(userMessage)
     }
 
     func stop() {
         readTask?.cancel()
         readTask = nil
+        pendingMessages.removeAll()
         if let process, process.isRunning {
             process.terminate()
         }
@@ -96,6 +91,97 @@ final class ClaudeAgent {
         stdinPipe = nil
         stdoutPipe = nil
         isRunning = false
+        isBusy = false
+    }
+
+    // MARK: - Private
+
+    private func spawnTurn(message: String) {
+        // Clean up previous process
+        readTask?.cancel()
+        readTask = nil
+        process = nil
+        stdinPipe = nil
+        stdoutPipe = nil
+
+        let proc = Process()
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+
+        var args = [
+            "claude",
+            "-p",
+            "--output-format", "stream-json",
+            "--input-format", "stream-json",
+            "--verbose",
+            "--dangerously-skip-permissions",
+            "--settings", "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"github.com\",\"api.github.com\"]}}}"
+        ]
+
+        if let sessionID {
+            args += ["--resume", sessionID]
+        }
+
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = args
+        proc.currentDirectoryURL = URL(fileURLWithPath: directory)
+        proc.standardInput = stdin
+        proc.standardOutput = stdout
+        proc.standardError = stderr
+
+        self.process = proc
+        self.stdinPipe = stdin
+        self.stdoutPipe = stdout
+
+        proc.terminationHandler = { [weak self] _ in
+            Task { @MainActor in
+                self?.onTurnComplete()
+            }
+        }
+
+        do {
+            try proc.run()
+        } catch {
+            log("=== Failed to spawn turn: \(error) ===")
+            isBusy = false
+            return
+        }
+
+        isBusy = true
+        onBusyChanged?(true)
+        startReading()
+
+        // Write the message to stdin
+        let payload: [String: Any] = [
+            "type": "user",
+            "message": [
+                "role": "user",
+                "content": message
+            ]
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: payload),
+           var jsonString = String(data: data, encoding: .utf8) {
+            jsonString += "\n"
+            if let messageData = jsonString.data(using: .utf8) {
+                log(">>> STDIN: \(jsonString.trimmingCharacters(in: .newlines))")
+                stdin.fileHandleForWriting.write(messageData)
+            }
+        }
+    }
+
+    private func onTurnComplete() {
+        guard isBusy else { return }
+        isBusy = false
+        onBusyChanged?(false)
+
+        // Process queued messages
+        if !pendingMessages.isEmpty {
+            let next = pendingMessages.removeFirst()
+            log("=== Dequeuing pending message: \(next) ===")
+            spawnTurn(message: next)
+        }
     }
 
     private func log(_ line: String) {
@@ -111,9 +197,6 @@ final class ClaudeAgent {
         let fileHandle = stdoutPipe.fileHandleForReading
 
         readTask = Task.detached { [weak self] in
-            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 65536)
-            defer { buffer.deallocate() }
-
             var lineBuffer = Data()
 
             while !Task.isCancelled {
@@ -122,7 +205,6 @@ final class ClaudeAgent {
 
                 lineBuffer.append(data)
 
-                // Process complete lines
                 while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
                     let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
                     lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
@@ -134,8 +216,32 @@ final class ClaudeAgent {
                         self?.log("<<< STDOUT: \(lineStr)")
                     }
 
-                    // Parse JSON line
                     if let event = try? JSONDecoder().decode(StreamEvent.self, from: Data(lineData)) {
+                        if event.type == "system", let sid = event.sessionID {
+                            await MainActor.run { [weak self] in
+                                self?.sessionID = sid
+                                self?.onSessionID?(sid)
+                            }
+                        }
+
+                        // Result event means the turn is done
+                        if event.type == "result" {
+                            await MainActor.run { [weak self] in
+                                self?.onTurnComplete()
+                            }
+                        }
+
+                        // Auto-approve sandbox permission requests
+                        // (we use --dangerously-skip-permissions so these auto-resolve,
+                        // but responding immediately avoids any timeout delay)
+                        if event.type == "control_request",
+                           let reqID = event.requestID {
+                            await MainActor.run { [weak self] in
+                                self?.respondToControlRequest(requestID: reqID, allow: true)
+                                self?.log("=== Auto-approved control_request \(reqID) ===")
+                            }
+                        }
+
                         let messages = event.toAgentMessages()
                         for message in messages {
                             await MainActor.run { [weak self] in

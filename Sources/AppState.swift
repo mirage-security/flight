@@ -115,6 +115,7 @@ final class AppState {
             showError(error.localizedDescription)
         }
 
+        ConfigService.deleteChatHistory(worktreeID: worktree.id)
         project.worktrees.removeAll { $0.id == worktree.id }
         if selectedWorktreeID == worktree.id {
             selectedWorktreeID = project.worktrees.first?.id
@@ -134,18 +135,44 @@ final class AppState {
 
         let agent = ClaudeAgent()
         agent.onMessage = { [weak worktree] message in
-            worktree?.messages.append(message)
+            guard let worktree else { return }
+            worktree.messages.append(message)
+            ConfigService.saveMessages(worktree.messages, worktreeID: worktree.id)
+        }
+        agent.onSessionID = { [weak self, weak worktree] sessionID in
+            worktree?.sessionID = sessionID
+            self?.saveConfig()
+        }
+        agent.onBusyChanged = { [weak worktree] busy in
+            worktree?.agentBusy = busy
         }
 
-        try agent.start(in: worktree.path, logFile: logFile)
+        try agent.start(in: worktree.path, resumeSessionID: worktree.sessionID, logFile: logFile)
         worktree.agent = agent
         worktree.status = .running
+    }
+
+    func respondToPermission(worktree: Worktree, requestID: String, allow: Bool) {
+        worktree.agent?.respondToControlRequest(requestID: requestID, allow: allow)
+    }
+
+    func interruptAgent(for worktree: Worktree) {
+        worktree.agent?.interrupt()
+        let msg = AgentMessage(role: .system, content: .text("Interrupted"))
+        worktree.messages.append(msg)
+        ConfigService.saveMessages(worktree.messages, worktreeID: worktree.id)
     }
 
     func stopAgent(for worktree: Worktree) {
         worktree.agent?.stop()
         worktree.agent = nil
         worktree.status = .idle
+    }
+
+    func stopAllAgents() {
+        for worktree in allWorktrees {
+            worktree.agent?.stop()
+        }
     }
 
     func restartAgent(for worktree: Worktree) {
@@ -174,6 +201,7 @@ final class AppState {
 
     func clearChat(for worktree: Worktree) {
         worktree.messages.removeAll()
+        ConfigService.saveMessages([], worktreeID: worktree.id)
     }
 
     // MARK: - GitHub Integration

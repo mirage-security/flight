@@ -87,10 +87,6 @@ struct WorktreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-
             Text(worktree.branch)
                 .lineLimit(1)
 
@@ -99,17 +95,27 @@ struct WorktreeRow: View {
             if let ciStatus = worktree.ciStatus {
                 CIBadge(conclusion: ciStatus.overall)
             }
+
+            Text(statusLabel)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(statusColor)
         }
     }
 
+    private var statusLabel: String {
+        if worktree.status == .creating { return "creating" }
+        if worktree.agentBusy { return "working" }
+        if worktree.agent?.isRunning == true { return "ready" }
+        if worktree.status == .error { return "error" }
+        return "idle"
+    }
+
     private var statusColor: Color {
-        switch worktree.status {
-        case .creating: return .yellow
-        case .idle: return .gray
-        case .running: return .green
-        case .error: return .red
-        case .done: return .blue
-        }
+        if worktree.status == .creating { return .yellow }
+        if worktree.agentBusy { return .orange }
+        if worktree.agent?.isRunning == true { return .green }
+        if worktree.status == .error { return .red }
+        return .secondary
     }
 }
 

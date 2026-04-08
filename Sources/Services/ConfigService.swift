@@ -61,4 +61,38 @@ enum ConfigService {
             .appendingPathComponent(branch)
             .path
     }
+
+    // MARK: - Chat History
+
+    private static var chatBaseURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("flight")
+            .appendingPathComponent("chat")
+    }
+
+    static func chatFileURL(worktreeID: UUID) -> URL {
+        try? FileManager.default.createDirectory(at: chatBaseURL, withIntermediateDirectories: true)
+        return chatBaseURL.appendingPathComponent("\(worktreeID.uuidString).json")
+    }
+
+    static func loadMessages(worktreeID: UUID) -> [AgentMessage] {
+        let url = chatFileURL(worktreeID: worktreeID)
+        guard let data = try? Data(contentsOf: url),
+              let messages = try? JSONDecoder().decode([AgentMessage].self, from: data) else {
+            return []
+        }
+        return messages
+    }
+
+    static func saveMessages(_ messages: [AgentMessage], worktreeID: UUID) {
+        let url = chatFileURL(worktreeID: worktreeID)
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(messages) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func deleteChatHistory(worktreeID: UUID) {
+        let url = chatFileURL(worktreeID: worktreeID)
+        try? FileManager.default.removeItem(at: url)
+    }
 }

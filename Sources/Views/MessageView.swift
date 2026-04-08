@@ -3,68 +3,105 @@ import SwiftUI
 struct MessageView: View {
     let message: AgentMessage
 
+    private var isUserMessage: Bool {
+        message.role == .user
+    }
+
     var body: some View {
         HStack {
-            if message.role == .user { Spacer(minLength: 60) }
+            if isUserMessage { Spacer(minLength: 80) }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                if message.isToolUse {
-                    toolUseView
-                } else if message.isToolResult {
-                    toolResultView
-                } else {
-                    textView
-                }
-            }
-
-            if message.role == .assistant { Spacer(minLength: 60) }
-        }
-    }
-
-    private var textView: some View {
-        Text(message.textContent)
-            .textSelection(.enabled)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                message.role == .user
-                    ? Color.accentColor.opacity(0.15)
-                    : Color(nsColor: .controlBackgroundColor)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var toolUseView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if case .toolUse(let name, _) = message.content {
-                HStack(spacing: 4) {
-                    Image(systemName: "wrench")
-                        .font(.caption2)
-                    Text(name)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
-                .foregroundStyle(.secondary)
-            }
             Text(message.textContent)
-                .font(.caption)
+                .font(.system(size: 14))
                 .textSelection(.enabled)
-                .lineLimit(6)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    isUserMessage
+                        ? Color.accentColor.opacity(0.12)
+                        : Color(nsColor: .controlBackgroundColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            isUserMessage ? Color.clear : Color(nsColor: .separatorColor),
+                            lineWidth: 1
+                        )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            if !isUserMessage { Spacer(minLength: 80) }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct ToolCallRow: View {
+    let message: AgentMessage
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+
+                    if message.isToolUse {
+                        if case .toolUse(let name, _) = message.content {
+                            Text(name)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.orange)
+                            if let desc = message.toolDescription {
+                                Text(desc)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    } else {
+                        Text("Result")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        if !isExpanded {
+                            Text(resultPreview)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text(message.textContent)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
+                    .padding(.leading, 16)
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private var toolResultView: some View {
-        Text(message.textContent)
-            .font(.caption)
-            .textSelection(.enabled)
-            .lineLimit(10)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.green.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+    private var resultPreview: String {
+        let text = message.textContent
+        if text.count > 80 {
+            return String(text.prefix(80)) + "..."
+        }
+        return text
     }
 }

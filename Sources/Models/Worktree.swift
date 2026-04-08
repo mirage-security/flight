@@ -16,7 +16,9 @@ final class Worktree: Identifiable {
     var status: WorktreeStatus
     var messages: [AgentMessage]
     var prNumber: Int?
+    var sessionID: String?
     var ciStatus: CIStatus?
+    var agentBusy: Bool = false
     var agent: ClaudeAgent?
 
     init(
@@ -24,7 +26,8 @@ final class Worktree: Identifiable {
         branch: String,
         path: String,
         status: WorktreeStatus = .idle,
-        prNumber: Int? = nil
+        prNumber: Int? = nil,
+        sessionID: String? = nil
     ) {
         self.id = id
         self.branch = branch
@@ -32,6 +35,7 @@ final class Worktree: Identifiable {
         self.status = status
         self.messages = []
         self.prNumber = prNumber
+        self.sessionID = sessionID
     }
 }
 
@@ -40,15 +44,19 @@ struct WorktreeConfig: Codable {
     let branch: String
     let path: String
     var prNumber: Int?
+    var sessionID: String?
 
     init(from worktree: Worktree) {
         self.id = worktree.id
         self.branch = worktree.branch
         self.path = worktree.path
         self.prNumber = worktree.prNumber
+        self.sessionID = worktree.sessionID
     }
 
     func toWorktree() -> Worktree {
-        Worktree(id: id, branch: branch, path: path, prNumber: prNumber)
+        let wt = Worktree(id: id, branch: branch, path: path, prNumber: prNumber, sessionID: sessionID)
+        wt.messages = ConfigService.loadMessages(worktreeID: id)
+        return wt
     }
 }
