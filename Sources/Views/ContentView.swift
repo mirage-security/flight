@@ -173,7 +173,10 @@ struct RemotePromptSheet: View {
     }
 
     private func workspaceChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            action()
+            isFocused = true
+        } label: {
             Text(label)
                 .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? .white : theme.text)

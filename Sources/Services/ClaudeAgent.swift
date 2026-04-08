@@ -117,31 +117,42 @@ final class ClaudeAgent {
         let stdout = Pipe()
         let stderr = Pipe()
 
+        let isRemote = !commandPrefix.isEmpty
+
         var claudeArgs = [
             "claude",
             "-p",
             "--output-format", "stream-json",
-            "--input-format", "stream-json",
             "--verbose",
-            "--dangerously-skip-permissions",
-            "--settings", "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"github.com\",\"api.github.com\"]}}}"
+            "--dangerously-skip-permissions"
         ]
+
+        // Local: use stdin for input. Remote: pass message as prompt arg (stdin over SSH is unreliable)
+        if !isRemote {
+            claudeArgs += ["--input-format", "stream-json"]
+            claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"github.com\",\"api.github.com\"]}}}"]
+        }
 
         if let sessionID {
             claudeArgs += ["--resume", sessionID]
         }
 
-        // Remote mode: prefix with connect command (e.g. coder ssh workspace --)
-        let fullArgs = commandPrefix + claudeArgs
+        if isRemote {
+            // Write message as base64 to a temp file on remote, then cat it into claude's prompt.
+            // This avoids all shell escaping issues with coder ssh --.
+            let b64 = Data(message.utf8).base64EncodedString()
+            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && \(claudeArgs.joined(separator: " ")) \"$(cat /tmp/flight-prompt.txt)\""
+            let sshCmd = commandPrefix.joined(separator: " ") + " \"\(remoteCmd.replacingOccurrences(of: "\"", with: "\\\""))\""
 
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = fullArgs
-
-        // Only set cwd for local mode
-        if commandPrefix.isEmpty {
+            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            proc.arguments = ["-l", "-c", sshCmd]
+        } else {
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            proc.arguments = claudeArgs
             proc.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
-        proc.standardInput = stdin
+
+        proc.standardInput = isRemote ? nil : stdin
         proc.standardOutput = stdout
         proc.standardError = stderr
 
@@ -167,39 +178,41 @@ final class ClaudeAgent {
         onBusyChanged?(true)
         startReading()
 
-        // Build message content — plain string for text-only, array for multimodal
-        let content: Any
-        if images.isEmpty {
-            content = message
-        } else {
-            var blocks: [[String: Any]] = images.map { imageData in
-                [
-                    "type": "image",
-                    "source": [
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": imageData.base64EncodedString()
+        // Remote: message already passed as CLI arg, skip stdin
+        if !isRemote, let stdinPipe = self.stdinPipe {
+            let content: Any
+            if images.isEmpty {
+                content = message
+            } else {
+                var blocks: [[String: Any]] = images.map { imageData in
+                    [
+                        "type": "image",
+                        "source": [
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": imageData.base64EncodedString()
+                        ]
                     ]
-                ]
+                }
+                blocks.append(["type": "text", "text": message])
+                content = blocks
             }
-            blocks.append(["type": "text", "text": message])
-            content = blocks
-        }
 
-        let payload: [String: Any] = [
-            "type": "user",
-            "message": [
-                "role": "user",
-                "content": content
+            let payload: [String: Any] = [
+                "type": "user",
+                "message": [
+                    "role": "user",
+                    "content": content
+                ]
             ]
-        ]
 
-        if let data = try? JSONSerialization.data(withJSONObject: payload),
-           var jsonString = String(data: data, encoding: .utf8) {
-            jsonString += "\n"
-            if let messageData = jsonString.data(using: .utf8) {
-                log(">>> STDIN: \(jsonString.trimmingCharacters(in: .newlines))")
-                stdin.fileHandleForWriting.write(messageData)
+            if let data = try? JSONSerialization.data(withJSONObject: payload),
+               var jsonString = String(data: data, encoding: .utf8) {
+                jsonString += "\n"
+                if let messageData = jsonString.data(using: .utf8) {
+                    log(">>> STDIN: \(jsonString.trimmingCharacters(in: .newlines))")
+                    stdinPipe.fileHandleForWriting.write(messageData)
+                }
             }
         }
     }
