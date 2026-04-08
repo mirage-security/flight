@@ -18,7 +18,6 @@ Inspired by [Conductor](https://conductor.build) and evolved from [inc](https://
 ### Planned
 
 - GitHub PR creation and CI status tracking per worktree
-- Image paste support (Cmd+V)
 
 ## Install
 
