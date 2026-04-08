@@ -18,6 +18,7 @@ final class AppState {
     private(set) var remoteMode: RemoteModeConfig?
 
     private var ciPollingTimer: Timer?
+    private var provisioningTasks: [UUID: Task<Void, Never>] = [:]
 
     var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
@@ -41,6 +42,22 @@ final class AppState {
         let config = ConfigService.load()
         self.projects = config.projects.map { $0.toProject() }
         self.remoteMode = config.remoteMode
+
+        // Remove stale remote worktrees that never finished provisioning
+        // (remote worktrees with no workspace name were mid-provision when the app quit)
+        var didClean = false
+        for project in projects {
+            let stale = project.worktrees.filter { $0.isRemote && $0.workspaceName == nil }
+            if !stale.isEmpty {
+                for wt in stale {
+                    ConfigService.deleteAllChatHistory(for: wt)
+                }
+                project.worktrees.removeAll { $0.isRemote && $0.workspaceName == nil }
+                didClean = true
+            }
+        }
+        if didClean { saveConfig() }
+
         startCIPolling()
     }
 
@@ -122,7 +139,7 @@ final class AppState {
         await createWorktree(branch: "flight/\(adj)-\(noun)-\(suffix)")
     }
 
-    func createRemoteWorktree(initialPrompt: String) async {
+    func createRemoteWorktree(initialPrompt: String) {
         guard let project = selectedProject ?? projects.first else { return }
         guard let remote = remoteMode else {
             showError("Remote mode not configured. Add remoteMode to ~/flight/config.json")
@@ -146,36 +163,46 @@ final class AppState {
         let provMsg = AgentMessage(role: .system, content: .text("Provisioning remote workspace..."))
         conversation.messages.append(provMsg)
 
-        do {
-            // 1. Provision: run the provision command, stream output as progress
-            let provisionCmd = remote.provision.replacingOccurrences(of: "{branch}", with: branch)
-            let workspaceName = try await ShellService.runStreaming(
-                provisionCmd,
-                in: project.path
-            ) { [weak conversation] line in
-                let msg = AgentMessage(role: .system, content: .text(line))
-                conversation?.messages.append(msg)
-            }.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let worktreeID = worktree.id
+        provisioningTasks[worktreeID] = Task {
+            do {
+                // 1. Provision: run the provision command, stream output as progress
+                let provisionCmd = remote.provision.replacingOccurrences(of: "{branch}", with: branch)
+                let workspaceName = try await ShellService.runStreaming(
+                    provisionCmd,
+                    in: project.path
+                ) { [weak conversation] line in
+                    let msg = AgentMessage(role: .system, content: .text(line))
+                    conversation?.messages.append(msg)
+                }.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            worktree.workspaceName = workspaceName
-            worktree.path = workspaceName // use workspace name as identifier
+                try Task.checkCancellation()
 
-            // 2. Build connect prefix
-            let connectCmd = remote.connect.replacingOccurrences(of: "{workspace}", with: workspaceName)
-            let connectPrefix = connectCmd.components(separatedBy: " ")
+                worktree.workspaceName = workspaceName
+                worktree.path = workspaceName // use workspace name as identifier
 
-            saveConfig()
+                // 2. Build connect prefix
+                let connectCmd = remote.connect.replacingOccurrences(of: "{workspace}", with: workspaceName)
+                let connectPrefix = connectCmd.components(separatedBy: " ")
 
-            // 3. Connected!
-            let connMsg = AgentMessage(role: .system, content: .text("Workspace \(workspaceName) ready. Connecting agent..."))
-            conversation.messages.append(connMsg)
+                saveConfig()
 
-            // 4. Start agent with connect prefix and send initial prompt
-            try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
-            conversation.agent?.send(message: initialPrompt)
-        } catch {
-            project.worktrees.removeAll { $0.id == worktree.id }
-            showError("Remote provisioning failed: \(error.localizedDescription)")
+                // 3. Connected!
+                let connMsg = AgentMessage(role: .system, content: .text("Workspace \(workspaceName) ready. Connecting agent..."))
+                conversation.messages.append(connMsg)
+
+                // 4. Start agent with connect prefix and send initial prompt
+                try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
+                conversation.agent?.send(message: initialPrompt)
+            } catch is CancellationError {
+                // Task was cancelled (app quitting) — remove the incomplete worktree
+                project.worktrees.removeAll { $0.id == worktree.id }
+                saveConfig()
+            } catch {
+                project.worktrees.removeAll { $0.id == worktree.id }
+                showError("Remote provisioning failed: \(error.localizedDescription)")
+            }
+            provisioningTasks.removeValue(forKey: worktreeID)
         }
     }
 
@@ -303,6 +330,12 @@ final class AppState {
     }
 
     func stopAllAgents() {
+        // Cancel any in-progress provisioning tasks (terminates the shell process)
+        for (_, task) in provisioningTasks {
+            task.cancel()
+        }
+        provisioningTasks.removeAll()
+
         for worktree in allWorktrees {
             for conversation in worktree.conversations {
                 conversation.agent?.stop()
