@@ -133,20 +133,21 @@ struct WorktreeRow: View {
     }
 
     private var statusColor: Color {
-        if worktree.status == .creating { return .yellow }
-        if worktree.agentBusy { return .orange }
-        if worktree.agent?.isRunning == true { return .green }
-        if worktree.status == .error { return .red }
+        if worktree.status == .creating { return theme.yellow }
+        if worktree.agentBusy { return theme.orange }
+        if worktree.agent?.isRunning == true { return theme.green }
+        if worktree.status == .error { return theme.red }
         return theme.secondaryText
     }
 }
 
 struct CIBadge: View {
     let conclusion: CIConclusion
+    @Environment(\.theme) private var theme
 
     var body: some View {
         Image(systemName: iconName)
-            .foregroundColor(iconColor)
+            .foregroundStyle(iconColor)
             .font(.caption)
     }
 
@@ -160,9 +161,9 @@ struct CIBadge: View {
 
     private var iconColor: Color {
         switch conclusion {
-        case .success: return .green
-        case .failure: return .red
-        case .pending: return .yellow
+        case .success: return theme.green
+        case .failure: return theme.red
+        case .pending: return theme.yellow
         }
     }
 }

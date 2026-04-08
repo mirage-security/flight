@@ -20,9 +20,10 @@ struct SettingsView: View {
             remoteTab
                 .tabItem { Label("Remote", systemImage: "cloud") }
         }
-        .frame(width: 500, height: 320)
+        .frame(width: 500, height: 380)
         .onAppear {
             themeNames = ThemeManager.shared.availableThemeNames()
+            state.reloadConfig()
             if let remote = state.remoteMode {
                 provision = remote.provision
                 connect = remote.connect
@@ -87,22 +88,37 @@ struct SettingsView: View {
     private var remoteTab: some View {
         Form {
             Section {
-                LabeledContent("Provision") {
-                    TextField("e.g. my-wrapper provision {branch}", text: $provision)
-                        .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Provision")
+                        .font(.system(size: 12, weight: .medium))
+                    TextEditor(text: $provision)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
                 }
-                LabeledContent("Connect") {
-                    TextField("e.g. coder ssh {workspace} --", text: $connect)
-                        .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Connect")
+                        .font(.system(size: 12, weight: .medium))
+                    TextEditor(text: $connect)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
                 }
-                LabeledContent("Teardown") {
-                    TextField("e.g. my-wrapper teardown {workspace}", text: $teardown)
-                        .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Teardown")
+                        .font(.system(size: 12, weight: .medium))
+                    TextEditor(text: $teardown)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
                 }
             } header: {
                 Text("Remote Mode")
             } footer: {
-                Text("Use {branch} and {workspace} as placeholders. Provision prints the workspace name to stdout.")
+                Text("Use {branch} and {workspace} as placeholders. Provision must print the workspace name to stdout.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -131,5 +147,13 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            // Reload in case config was edited externally
+            if let remote = state.remoteMode {
+                provision = remote.provision
+                connect = remote.connect
+                teardown = remote.teardown
+            }
+        }
     }
 }

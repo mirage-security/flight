@@ -55,7 +55,14 @@ struct Base16Scheme: Codable {
             toolGroupBackground: bgLight.opacity(0.8),
             border: border.opacity(0.5),
             accent: blue,
-            headerBackground: bgLight
+            headerBackground: bgLight,
+            red: Color(hex: base08),
+            orange: Color(hex: base09),
+            yellow: Color(hex: base0A),
+            green: Color(hex: base0B),
+            cyan: Color(hex: base0C),
+            blue: blue,
+            purple: Color(hex: base0E)
         )
     }
 
@@ -165,6 +172,15 @@ struct ThemeColors {
     let accent: Color
     let headerBackground: Color
 
+    // Semantic colors (mapped from Base16)
+    let red: Color       // base08 — errors, stop, CI failure
+    let orange: Color    // base09 — tool calls, working status
+    let yellow: Color    // base0A — warnings, creating status, permissions
+    let green: Color     // base0B — success, ready status, CI pass
+    let cyan: Color      // base0C — info
+    let blue: Color      // base0D — accent, links (same as accent)
+    let purple: Color    // base0E — plan mode
+
     static let system = ThemeColors(
         background: Color(nsColor: .windowBackgroundColor),
         sidebar: Color(nsColor: .windowBackgroundColor),
@@ -176,7 +192,14 @@ struct ThemeColors {
         toolGroupBackground: Color(nsColor: .controlBackgroundColor).opacity(0.5),
         border: Color(nsColor: .separatorColor),
         accent: Color.accentColor,
-        headerBackground: Color(nsColor: .windowBackgroundColor)
+        headerBackground: Color(nsColor: .windowBackgroundColor),
+        red: .red,
+        orange: .orange,
+        yellow: .yellow,
+        green: .green,
+        cyan: .cyan,
+        blue: Color.accentColor,
+        purple: .purple
     )
 }
 

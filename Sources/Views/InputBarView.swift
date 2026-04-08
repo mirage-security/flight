@@ -28,12 +28,12 @@ struct InputBarView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(planMode ? Color.purple.opacity(0.15) : theme.inputBackground)
-                    .foregroundStyle(planMode ? .purple : theme.secondaryText)
+                    .background(planMode ? theme.purple.opacity(0.15) : theme.inputBackground)
+                    .foregroundStyle(planMode ? theme.purple : theme.secondaryText)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .stroke(planMode ? Color.purple.opacity(0.3) : theme.border, lineWidth: 1)
+                            .stroke(planMode ? theme.purple.opacity(0.3) : theme.border, lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -52,8 +52,8 @@ struct InputBarView: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color.red.opacity(0.15))
-                        .foregroundStyle(.red)
+                        .background(theme.red.opacity(0.15))
+                        .foregroundStyle(theme.red)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
@@ -69,10 +69,10 @@ struct InputBarView: View {
                     .font(.system(size: fontSize))
                     .foregroundStyle(theme.text)
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 20, maxHeight: 100)
+                    .frame(minHeight: 40, maxHeight: 150)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                     .background(theme.inputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(

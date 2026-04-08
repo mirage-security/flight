@@ -53,7 +53,7 @@ struct ToolCallRow: View {
                         if case .toolUse(let name, _) = message.content {
                             Text(name)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(theme.orange)
                             if let desc = message.toolDescription {
                                 Text(desc)
                                     .font(.system(size: 11))

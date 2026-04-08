@@ -58,6 +58,11 @@ final class AppState {
         saveConfig()
     }
 
+    func reloadConfig() {
+        let config = ConfigService.load()
+        self.remoteMode = config.remoteMode
+    }
+
     func updateRemoteMode(_ config: RemoteModeConfig?) {
         remoteMode = config
         saveConfig()

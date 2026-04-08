@@ -134,7 +134,7 @@ struct ChatView: View {
             if let prNumber = worktree.prNumber {
                 Label("PR #\(prNumber)", systemImage: "arrow.triangle.pull")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
             Text(headerStatusLabel)
                 .font(.caption)
@@ -147,20 +147,21 @@ struct ChatView: View {
     private var fixCIBar: some View {
         HStack {
             Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(theme.red)
             Text("CI checks failed")
                 .font(.callout)
+                .foregroundStyle(theme.text)
             Spacer()
             Button("Fix CI") {
                 Task { await state.fixCI(for: worktree) }
             }
             .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .tint(theme.red)
             .controlSize(.small)
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(.red.opacity(0.1))
+        .background(theme.red.opacity(0.1))
     }
 
     private var headerStatusLabel: String {
@@ -172,11 +173,11 @@ struct ChatView: View {
     }
 
     private var headerStatusColor: Color {
-        if worktree.status == .creating { return .yellow }
-        if worktree.agentBusy { return .orange }
-        if worktree.agent?.isRunning == true { return .green }
-        if worktree.status == .error { return .red }
-        return .secondary
+        if worktree.status == .creating { return theme.yellow }
+        if worktree.agentBusy { return theme.orange }
+        if worktree.agent?.isRunning == true { return theme.green }
+        if worktree.status == .error { return theme.red }
+        return theme.secondaryText
     }
 
     private var statusColor: Color {
@@ -227,7 +228,7 @@ struct ToolGroupView: View {
 
                     Image(systemName: "wrench.and.screwdriver")
                         .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(theme.orange)
 
                     Text("\(toolUseCount) tool \(toolUseCount == 1 ? "call" : "calls")")
                         .font(.system(size: 12, weight: .medium))
@@ -268,6 +269,7 @@ struct ToolGroupView: View {
 
 struct SystemMessageView: View {
     let message: AgentMessage
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack {
@@ -278,10 +280,10 @@ struct SystemMessageView: View {
                 Text(message.textContent)
                     .font(.system(size: 12, weight: .medium))
             }
-            .foregroundStyle(.red)
+            .foregroundStyle(theme.red)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Color.red.opacity(0.08))
+            .background(theme.red.opacity(0.08))
             .clipShape(Capsule())
             Spacer()
         }
@@ -294,6 +296,7 @@ struct PermissionRequestView: View {
     let message: AgentMessage
     let worktree: Worktree
     @Bindable var state: AppState
+    @Environment(\.theme) private var theme
     @State private var responded = false
 
     var body: some View {
@@ -301,14 +304,15 @@ struct PermissionRequestView: View {
             HStack(spacing: 12) {
                 Image(systemName: "lock.shield")
                     .font(.system(size: 16))
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(theme.yellow)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Permission Request")
                         .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.text)
                     Text(description)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
 
                 Spacer()
@@ -316,7 +320,7 @@ struct PermissionRequestView: View {
                 if responded {
                     Text("Allowed")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(theme.green)
                 } else {
                     Button("Deny") {
                         state.respondToPermission(worktree: worktree, requestID: requestID, allow: false)
@@ -330,15 +334,16 @@ struct PermissionRequestView: View {
                         responded = true
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(theme.accent)
                     .controlSize(.small)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.yellow.opacity(0.08))
+            .background(theme.yellow.opacity(0.08))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+                    .stroke(theme.yellow.opacity(0.3), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }

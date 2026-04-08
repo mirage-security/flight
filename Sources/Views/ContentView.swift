@@ -56,6 +56,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $state.showingRemotePrompt) {
             RemotePromptSheet(state: state)
+                .environment(\.theme, theme)
         }
     }
 }
@@ -63,31 +64,54 @@ struct ContentView: View {
 struct RemotePromptSheet: View {
     @Bindable var state: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
     @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(spacing: 16) {
             Text("New Remote Worktree")
                 .font(.headline)
+                .foregroundStyle(theme.text)
 
             Text("What should the agent work on?")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
 
             TextEditor(text: $state.remoteInitialPrompt)
                 .font(.system(size: 13))
+                .foregroundStyle(theme.text)
+                .scrollContentBackground(.hidden)
                 .frame(width: 450, height: 120)
+                .padding(8)
+                .background(theme.inputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.border, lineWidth: 1)
+                )
                 .focused($isFocused)
 
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Launch") { launch() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(state.remoteInitialPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .foregroundStyle(theme.secondaryText)
+                Button {
+                    launch()
+                } label: {
+                    Text("Launch")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(theme.accent)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.defaultAction)
+                .disabled(state.remoteInitialPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(24)
+        .background(theme.background)
         .onAppear { isFocused = true }
     }
 
