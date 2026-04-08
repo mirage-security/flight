@@ -75,9 +75,12 @@ enum ShellService {
 
         try process.run()
 
-        // Read stdout in background, streaming lines
-        var allOutput = ""
         let fileHandle = stdoutPipe.fileHandleForReading
+        // Use a sendable wrapper to accumulate output across actor boundaries
+        final class OutputAccumulator: @unchecked Sendable {
+            var value = ""
+        }
+        let output = OutputAccumulator()
 
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached {
@@ -93,23 +96,18 @@ enum ShellService {
                         let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
                         lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
                         if let line = String(data: Data(lineData), encoding: .utf8), !line.isEmpty {
-                            await MainActor.run {
-                                allOutput += line + "\n"
-                                onLine(line)
-                            }
+                            output.value += line + "\n"
+                            await MainActor.run { onLine(line) }
                         }
                     }
                 }
 
                 // Remaining partial line
                 if !lineBuffer.isEmpty, let line = String(data: lineBuffer, encoding: .utf8), !line.isEmpty {
-                    await MainActor.run {
-                        allOutput += line
-                        onLine(line)
-                    }
+                    output.value += line
+                    await MainActor.run { onLine(line) }
                 }
 
-                // Wait for termination
                 process.waitUntilExit()
 
                 if process.terminationStatus != 0 {
@@ -121,7 +119,7 @@ enum ShellService {
                         stderr: stderr
                     ))
                 } else {
-                    continuation.resume(returning: allOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+                    continuation.resume(returning: output.value.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             }
         }
