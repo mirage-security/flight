@@ -6,6 +6,7 @@ enum WorktreeStatus: String {
     case running
     case error
     case done
+    case deleting
 }
 
 @Observable

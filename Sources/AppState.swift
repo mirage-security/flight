@@ -257,6 +257,8 @@ final class AppState {
             conversation.agent?.stop()
         }
 
+        worktree.status = .deleting
+
         if worktree.isRemote, let workspaceName = worktree.workspaceName, let remote = project.remoteMode {
             // Only teardown if no other worktrees use this workspace
             let othersOnSameWorkspace = allWorktrees.contains {
