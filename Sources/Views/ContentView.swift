@@ -133,8 +133,6 @@ struct RemotePromptSheet: View {
         guard !prompt.isEmpty else { return }
         state.remoteInitialPrompt = ""
         dismiss()
-        Task {
-            await state.createRemoteWorktree(initialPrompt: prompt)
-        }
+        state.createRemoteWorktree(initialPrompt: prompt)
     }
 }

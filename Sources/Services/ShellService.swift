@@ -54,6 +54,7 @@ enum ShellService {
     }
 
     /// Run a command and stream stdout lines via a callback. Returns the full stdout on completion.
+    /// Supports Swift Task cancellation — the process is terminated if the calling task is cancelled.
     @discardableResult
     static func runStreaming(
         _ command: String,
@@ -82,46 +83,50 @@ enum ShellService {
         }
         let output = OutputAccumulator()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached {
-                var lineBuffer = Data()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                Task.detached {
+                    var lineBuffer = Data()
 
-                while true {
-                    let data = fileHandle.availableData
-                    if data.isEmpty { break }
+                    while true {
+                        let data = fileHandle.availableData
+                        if data.isEmpty { break }
 
-                    lineBuffer.append(data)
+                        lineBuffer.append(data)
 
-                    while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
-                        let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
-                        lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
-                        if let line = String(data: Data(lineData), encoding: .utf8), !line.isEmpty {
-                            output.value += line + "\n"
-                            await MainActor.run { onLine(line) }
+                        while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                            let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
+                            lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+                            if let line = String(data: Data(lineData), encoding: .utf8), !line.isEmpty {
+                                output.value += line + "\n"
+                                await MainActor.run { onLine(line) }
+                            }
                         }
                     }
-                }
 
-                // Remaining partial line
-                if !lineBuffer.isEmpty, let line = String(data: lineBuffer, encoding: .utf8), !line.isEmpty {
-                    output.value += line
-                    await MainActor.run { onLine(line) }
-                }
+                    // Remaining partial line
+                    if !lineBuffer.isEmpty, let line = String(data: lineBuffer, encoding: .utf8), !line.isEmpty {
+                        output.value += line
+                        await MainActor.run { onLine(line) }
+                    }
 
-                process.waitUntilExit()
+                    process.waitUntilExit()
 
-                if process.terminationStatus != 0 {
-                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                    continuation.resume(throwing: ShellError.failed(
-                        command: command,
-                        exitCode: process.terminationStatus,
-                        stderr: stderr
-                    ))
-                } else {
-                    continuation.resume(returning: output.value.trimmingCharacters(in: .whitespacesAndNewlines))
+                    if process.terminationStatus != 0 {
+                        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                        continuation.resume(throwing: ShellError.failed(
+                            command: command,
+                            exitCode: process.terminationStatus,
+                            stderr: stderr
+                        ))
+                    } else {
+                        continuation.resume(returning: output.value.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
                 }
             }
+        } onCancel: {
+            process.terminate()
         }
     }
 }
