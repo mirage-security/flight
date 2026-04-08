@@ -146,6 +146,7 @@ struct WorktreeRow: View {
     }
 
     private var statusLabel: String {
+        if worktree.status == .deleting { return "deleting" }
         if worktree.status == .creating { return "creating" }
         if worktree.anyAgentBusy { return "working" }
         if worktree.anyAgentRunning { return "ready" }
@@ -154,6 +155,7 @@ struct WorktreeRow: View {
     }
 
     private var statusColor: Color {
+        if worktree.status == .deleting { return theme.red }
         if worktree.status == .creating { return theme.yellow }
         if worktree.anyAgentBusy { return theme.orange }
         if worktree.anyAgentRunning { return theme.green }

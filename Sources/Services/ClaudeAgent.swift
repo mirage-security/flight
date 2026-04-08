@@ -139,10 +139,11 @@ final class ClaudeAgent {
 
         if isRemote {
             // Write message as base64 to a temp file on remote, then cat it into claude's prompt.
-            // This avoids all shell escaping issues with coder ssh --.
+            // Format: claude -p "$(cat /tmp/...)" --flags...
             let b64 = Data(message.utf8).base64EncodedString()
-            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && \(claudeArgs.joined(separator: " ")) \"$(cat /tmp/flight-prompt.txt)\""
-            let sshCmd = commandPrefix.joined(separator: " ") + " \"\(remoteCmd.replacingOccurrences(of: "\"", with: "\\\""))\""
+            let flags = claudeArgs.dropFirst(2).joined(separator: " ") // drop "claude" and "-p"
+            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && claude -p \\\"$(cat /tmp/flight-prompt.txt)\\\" \(flags)"
+            let sshCmd = commandPrefix.joined(separator: " ") + " \"\(remoteCmd)\""
 
             proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
             proc.arguments = ["-l", "-c", sshCmd]
