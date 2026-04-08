@@ -13,8 +13,12 @@ Inspired by [Conductor](https://conductor.build) and evolved from [inc](https://
 - Chat with agents in a streaming UI with collapsible tool calls and markdown rendering
 - Run agents locally (sandboxed) or remotely via SSH (e.g. Coder, EC2, any machine)
 - Multiple conversations per worktree with tab support
-- GitHub PR creation and CI status tracking per worktree
 - Base16 theme engine with 6 built-in themes + import support
+
+### Planned
+
+- GitHub PR creation and CI status tracking per worktree
+- Image paste support (Cmd+V)
 
 ## Install
 
