@@ -90,8 +90,21 @@ struct RemotePromptSheet: View {
                         .stroke(theme.border, lineWidth: 1)
                 )
                 .focused($isFocused)
+                .onKeyPress(.return, phases: .down) { keyPress in
+                    if keyPress.modifiers.contains(.command) {
+                        launch()
+                        return .handled
+                    }
+                    return .ignored
+                }
 
             HStack {
+                Text("Cmd+Enter to launch")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.secondaryText)
+
+                Spacer()
+
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .foregroundStyle(theme.secondaryText)
