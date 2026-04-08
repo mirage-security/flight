@@ -206,8 +206,6 @@ final class AppState {
         selectedWorktreeID = worktree.id
 
         // Add a system message showing provisioning
-        let provMsg = AgentMessage(role: .system, content: .text("Provisioning remote workspace..."))
-        conversation.messages.append(provMsg)
 
         let worktreeID = worktree.id
         provisioningTasks[worktreeID] = Task {

@@ -16,15 +16,17 @@ struct SidebarView: View {
                             Text(project.name)
                                 .font(.system(size: 12, weight: .semibold))
                             Spacer()
-                            Button {
-                                state.selectedProjectID = project.id
-                                Task { await state.createWorktreeWithRandomName() }
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(theme.secondaryText)
-                            }
-                            .buttonStyle(.plain)
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(theme.secondaryText)
+                                .onTapGesture {
+                                    state.selectedProjectID = project.id
+                                    if NSEvent.modifierFlags.contains(.shift) && project.hasRemoteMode {
+                                        state.showingRemotePrompt = true
+                                    } else {
+                                        Task { await state.createWorktreeWithRandomName() }
+                                    }
+                                }
                         }
                         .foregroundStyle(theme.secondaryText)
                         .padding(.horizontal, 12)
