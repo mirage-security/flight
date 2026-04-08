@@ -147,10 +147,15 @@ final class AppState {
         conversation.messages.append(provMsg)
 
         do {
-            // 1. Provision: run the provision command, capture workspace name
+            // 1. Provision: run the provision command, stream output as progress
             let provisionCmd = remote.provision.replacingOccurrences(of: "{branch}", with: branch)
-            let workspaceName = try await ShellService.run(provisionCmd, in: project.path)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let workspaceName = try await ShellService.runStreaming(
+                provisionCmd,
+                in: project.path
+            ) { [weak conversation] line in
+                let msg = AgentMessage(role: .system, content: .text(line))
+                conversation?.messages.append(msg)
+            }.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
             worktree.workspaceName = workspaceName
             worktree.path = workspaceName // use workspace name as identifier
@@ -161,7 +166,11 @@ final class AppState {
 
             saveConfig()
 
-            // 3. Start agent with connect prefix and send initial prompt
+            // 3. Connected!
+            let connMsg = AgentMessage(role: .system, content: .text("Workspace \(workspaceName) ready. Connecting agent..."))
+            conversation.messages.append(connMsg)
+
+            // 4. Start agent with connect prefix and send initial prompt
             try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
             conversation.agent?.send(message: initialPrompt)
         } catch {

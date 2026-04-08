@@ -16,11 +16,24 @@ struct SidebarView: View {
                             Text(project.name)
                                 .font(.system(size: 12, weight: .semibold))
                             Spacer()
+                            Button {
+                                state.selectedProjectID = project.id
+                                Task { await state.createWorktreeWithRandomName() }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(theme.secondaryText)
+                            }
+                            .buttonStyle(.plain)
                         }
                         .foregroundStyle(theme.secondaryText)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .padding(.top, 4)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            state.selectedProjectID = project.id
+                        }
                         .contextMenu {
                             Button("Remove Project") {
                                 state.removeProject(project)

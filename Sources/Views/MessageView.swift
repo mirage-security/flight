@@ -13,18 +13,25 @@ struct MessageView: View {
         HStack {
             if isUserMessage { Spacer(minLength: 80) }
 
-            Text(message.textContent)
-                .font(.system(size: fontSize))
-                .foregroundStyle(theme.text)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(isUserMessage ? theme.userBubble : theme.assistantBubble)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isUserMessage ? Color.clear : theme.border, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            Group {
+                if isUserMessage {
+                    Text(message.textContent)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(theme.text)
+                        .textSelection(.enabled)
+                } else {
+                    MarkdownText(message.textContent, fontSize: fontSize)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(isUserMessage ? theme.userBubble : theme.assistantBubble)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isUserMessage ? Color.clear : theme.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
 
             if !isUserMessage { Spacer(minLength: 80) }
         }
