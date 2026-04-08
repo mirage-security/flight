@@ -42,9 +42,10 @@ final class ClaudeAgent {
         isRunning = true
     }
 
-    func send(message: String) {
+    func send(message: String, images: [Data] = []) {
         // Add user message to the chat locally immediately
-        let userMessage = AgentMessage(role: .user, content: .text(message))
+        let displayText = images.isEmpty ? message : "\(message)\n[📎 \(images.count) image\(images.count == 1 ? "" : "s") attached]"
+        let userMessage = AgentMessage(role: .user, content: .text(displayText))
         onMessage?(userMessage)
 
         if isBusy {
@@ -54,7 +55,7 @@ final class ClaudeAgent {
             return
         }
 
-        spawnTurn(message: message)
+        spawnTurn(message: message, images: images)
     }
 
     func interrupt() {
@@ -103,7 +104,7 @@ final class ClaudeAgent {
 
     // MARK: - Private
 
-    private func spawnTurn(message: String) {
+    private func spawnTurn(message: String, images: [Data] = []) {
         // Clean up previous process
         readTask?.cancel()
         readTask = nil
@@ -166,12 +167,30 @@ final class ClaudeAgent {
         onBusyChanged?(true)
         startReading()
 
-        // Write the message to stdin
+        // Build message content — plain string for text-only, array for multimodal
+        let content: Any
+        if images.isEmpty {
+            content = message
+        } else {
+            var blocks: [[String: Any]] = images.map { imageData in
+                [
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": imageData.base64EncodedString()
+                    ]
+                ]
+            }
+            blocks.append(["type": "text", "text": message])
+            content = blocks
+        }
+
         let payload: [String: Any] = [
             "type": "user",
             "message": [
                 "role": "user",
-                "content": message
+                "content": content
             ]
         ]
 
