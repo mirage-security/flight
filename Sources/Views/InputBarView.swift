@@ -1,5 +1,11 @@
 import SwiftUI
 
+struct ImageAttachment: Identifiable {
+    let id = UUID()
+    let image: NSImage
+    let pngData: Data
+}
+
 struct InputBarView: View {
     @Bindable var state: AppState
     let worktree: Worktree
@@ -7,7 +13,7 @@ struct InputBarView: View {
     @Environment(\.theme) private var theme
     @State private var messageText = ""
     @State private var planMode = false
-    @FocusState private var isFocused: Bool
+    @State private var attachedImages: [ImageAttachment] = []
 
     private var conversation: Conversation? {
         worktree.activeConversation
@@ -67,34 +73,65 @@ struct InputBarView: View {
             .padding(.top, 6)
             .padding(.bottom, 4)
 
+            // Image attachment previews
+            if !attachedImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachedImages) { attachment in
+                            ZStack(alignment: .topTrailing) {
+                                Image(nsImage: attachment.image)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 80)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(theme.border, lineWidth: 1)
+                                    )
+
+                                Button {
+                                    attachedImages.removeAll { $0.id == attachment.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.white)
+                                        .background(Circle().fill(.black.opacity(0.6)))
+                                }
+                                .buttonStyle(.plain)
+                                .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+                }
+            }
+
             // Input row
             HStack(spacing: 8) {
-                TextEditor(text: $messageText)
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(theme.text)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 40, maxHeight: 150)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(theme.inputBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(theme.border, lineWidth: 1)
-                    )
-                    .focused($isFocused)
-                    .onKeyPress(.return) {
-                        sendMessage()
-                        return .handled
-                    }
-                    .onKeyPress(.escape) {
+                PasteableTextView(
+                    text: $messageText,
+                    font: .systemFont(ofSize: CGFloat(fontSize)),
+                    textColor: NSColor(theme.text),
+                    onReturn: { sendMessage() },
+                    onEscape: {
                         if isAgentBusy, let conversation {
                             state.interruptAgent(for: conversation, in: worktree)
-                            return .handled
                         }
-                        return .ignored
+                    },
+                    onImagePaste: { image, data in
+                        attachedImages.append(ImageAttachment(image: image, pngData: data))
                     }
+                )
+                .frame(minHeight: 40, maxHeight: 150)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(theme.inputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.border, lineWidth: 1)
+                )
 
                 Button {
                     sendMessage()
@@ -103,26 +140,34 @@ struct InputBarView: View {
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(messageText.isEmpty ? theme.secondaryText : theme.accent)
-                .disabled(messageText.isEmpty)
+                .foregroundColor(canSend ? theme.accent : theme.secondaryText)
+                .disabled(!canSend)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
         .background(theme.headerBackground)
-        .onAppear { isFocused = true }
+    }
+
+    private var canSend: Bool {
+        !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
     }
 
     private func sendMessage() {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || !attachedImages.isEmpty else { return }
         guard let conversation else { return }
+
+        let images = attachedImages.map { $0.pngData }
         messageText = ""
+        attachedImages.removeAll()
+
+        let message = text.isEmpty ? "What's in this image?" : text
 
         if planMode {
-            state.sendMessage("/plan \(text)", to: worktree, conversation: conversation)
+            state.sendMessage("/plan \(message)", images: images, to: worktree, conversation: conversation)
         } else {
-            state.sendMessage(text, to: worktree, conversation: conversation)
+            state.sendMessage(message, images: images, to: worktree, conversation: conversation)
         }
     }
 }
