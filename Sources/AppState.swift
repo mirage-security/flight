@@ -237,7 +237,26 @@ final class AppState {
 
                 // 4. Start agent with connect prefix and send initial prompt
                 try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
+
+                // Notify when first response arrives
+                let previousHandler = conversation.agent?.onBusyChanged
+                conversation.agent?.onBusyChanged = { [weak conversation] busy in
+                    previousHandler?(busy)
+                    if !busy {
+                        NotificationService.send(
+                            title: "Remote Workspace Ready",
+                            body: "\(workspaceName) — first response received"
+                        )
+                        // Restore original handler so we only notify once
+                        conversation?.agent?.onBusyChanged = previousHandler
+                    }
+                }
+
                 conversation.agent?.send(message: initialPrompt)
+                NotificationService.send(
+                    title: "Workspace Online",
+                    body: "\(workspaceName) — prompt sent"
+                )
             } catch is CancellationError {
                 // Task was cancelled (app quitting) — remove the incomplete worktree
                 project.worktrees.removeAll { $0.id == worktree.id }

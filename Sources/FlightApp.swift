@@ -13,6 +13,7 @@ struct FlightApp: App {
         ) { [state] _ in
             state.stopAllAgents()
         }
+        NotificationService.requestPermission()
     }
 
     @State private var themeManager = ThemeManager.shared
