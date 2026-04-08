@@ -75,10 +75,6 @@ struct WorktreeConfig: Codable {
     var conversations: [ConversationConfig]?
     var activeConversationID: UUID?
 
-    // Legacy fields for migration
-    var id: UUID?
-    var sessionID: String?
-
     init(from worktree: Worktree) {
         self.branch = worktree.branch
         self.path = worktree.path
@@ -87,8 +83,6 @@ struct WorktreeConfig: Codable {
         self.workspaceName = worktree.workspaceName
         self.conversations = worktree.conversations.map { ConversationConfig(from: $0) }
         self.activeConversationID = worktree.activeConversationID
-        self.id = nil
-        self.sessionID = nil
     }
 
     func toWorktree() -> Worktree {
@@ -101,11 +95,6 @@ struct WorktreeConfig: Codable {
         if let convConfigs = conversations, !convConfigs.isEmpty {
             wt.conversations = convConfigs.map { $0.toConversation() }
             wt.activeConversationID = activeConversationID ?? wt.conversations.first?.id
-        } else if let legacySessionID = sessionID, let legacyID = id {
-            let conv = Conversation(name: "Chat", sessionID: legacySessionID)
-            conv.messages = ConfigService.loadMessages(conversationID: legacyID)
-            wt.conversations = [conv]
-            wt.activeConversationID = conv.id
         }
 
         return wt
