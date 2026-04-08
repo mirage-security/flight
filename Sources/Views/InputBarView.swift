@@ -28,12 +28,12 @@ struct InputBarView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(planMode ? Color.purple.opacity(0.15) : Color(nsColor: .controlBackgroundColor))
-                    .foregroundStyle(planMode ? .purple : .secondary)
+                    .background(planMode ? Color.purple.opacity(0.15) : theme.inputBackground)
+                    .foregroundStyle(planMode ? .purple : theme.secondaryText)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .stroke(planMode ? Color.purple.opacity(0.3) : Color(nsColor: .separatorColor), lineWidth: 1)
+                            .stroke(planMode ? Color.purple.opacity(0.3) : theme.border, lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -52,7 +52,7 @@ struct InputBarView: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color.red.opacity(0.1))
+                        .background(Color.red.opacity(0.15))
                         .foregroundStyle(.red)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
@@ -67,8 +67,18 @@ struct InputBarView: View {
             HStack(spacing: 8) {
                 TextEditor(text: $messageText)
                     .font(.system(size: fontSize))
+                    .foregroundStyle(theme.text)
+                    .scrollContentBackground(.hidden)
                     .frame(minHeight: 20, maxHeight: 100)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(theme.inputBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(theme.border, lineWidth: 1)
+                    )
                     .focused($isFocused)
                     .onKeyPress(.return) {
                         sendMessage()
@@ -89,7 +99,7 @@ struct InputBarView: View {
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(messageText.isEmpty ? .gray : .accentColor)
+                .foregroundColor(messageText.isEmpty ? theme.secondaryText : theme.accent)
                 .disabled(messageText.isEmpty)
             }
             .padding(.horizontal, 12)
@@ -105,7 +115,6 @@ struct InputBarView: View {
         messageText = ""
 
         if planMode {
-            // Wrap in plan mode instruction
             state.sendMessage("/plan \(text)", to: worktree)
         } else {
             state.sendMessage(text, to: worktree)
