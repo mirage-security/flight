@@ -218,7 +218,7 @@ final class AppState {
                     provisionCmd,
                     in: project.path
                 ) { [weak conversation] line in
-                    let msg = AgentMessage(role: .system, content: .text(line))
+                    let msg = AgentMessage(role: .system, content: .provisionLog(line))
                     conversation?.messages.append(msg)
                 }.components(separatedBy: "\n").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 

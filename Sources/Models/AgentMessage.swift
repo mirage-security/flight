@@ -11,6 +11,7 @@ enum MessageContent: Codable {
     case toolUse(name: String, input: String)
     case toolResult(content: String)
     case permissionRequest(requestID: String, description: String)
+    case provisionLog(String)
 }
 
 struct AgentMessage: Identifiable, Codable {
@@ -41,6 +42,8 @@ struct AgentMessage: Identifiable, Codable {
             return content
         case .permissionRequest(_, let description):
             return description
+        case .provisionLog(let line):
+            return line
         }
     }
 
@@ -56,6 +59,11 @@ struct AgentMessage: Identifiable, Codable {
 
     var isPermissionRequest: Bool {
         if case .permissionRequest = content { return true }
+        return false
+    }
+
+    var isProvisionLog: Bool {
+        if case .provisionLog = content { return true }
         return false
     }
 

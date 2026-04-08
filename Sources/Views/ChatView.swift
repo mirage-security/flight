@@ -4,12 +4,14 @@ import SwiftUI
 enum ChatSection: Identifiable {
     case message(AgentMessage)
     case toolGroup(id: UUID, tools: [AgentMessage])
+    case provisionGroup(id: UUID, logs: [AgentMessage])
     case system(AgentMessage)
 
     var id: UUID {
         switch self {
         case .message(let m): return m.id
         case .toolGroup(let id, _): return id
+        case .provisionGroup(let id, _): return id
         case .system(let m): return m.id
         }
     }
@@ -17,6 +19,7 @@ enum ChatSection: Identifiable {
     static func build(from messages: [AgentMessage]) -> [ChatSection] {
         var sections: [ChatSection] = []
         var currentTools: [AgentMessage] = []
+        var currentProvisionLogs: [AgentMessage] = []
 
         func flushTools() {
             if !currentTools.isEmpty {
@@ -25,18 +28,32 @@ enum ChatSection: Identifiable {
             }
         }
 
+        func flushProvisionLogs() {
+            if !currentProvisionLogs.isEmpty {
+                sections.append(.provisionGroup(id: currentProvisionLogs[0].id, logs: currentProvisionLogs))
+                currentProvisionLogs = []
+            }
+        }
+
         for message in messages {
-            if message.role == .system {
+            if message.isProvisionLog {
                 flushTools()
+                currentProvisionLogs.append(message)
+            } else if message.role == .system {
+                flushTools()
+                flushProvisionLogs()
                 sections.append(.system(message))
             } else if message.isToolUse || message.isToolResult {
+                flushProvisionLogs()
                 currentTools.append(message)
             } else {
                 flushTools()
+                flushProvisionLogs()
                 sections.append(.message(message))
             }
         }
         flushTools()
+        flushProvisionLogs()
         return sections
     }
 }
@@ -81,6 +98,10 @@ struct ChatView: View {
                             case .toolGroup(_, let tools):
                                 let isLast = index == sections.count - 1
                                 ToolGroupView(tools: tools, isActive: isLast && isThinking)
+                                    .id(section.id)
+                            case .provisionGroup(_, let logs):
+                                let isLast = index == sections.count - 1
+                                ProvisionGroupView(logs: logs, isActive: isLast && worktree.status == .creating)
                                     .id(section.id)
                             case .system(let message):
                                 if message.isPermissionRequest, let conversation {
@@ -335,6 +356,85 @@ struct ToolGroupView: View {
                     }
                 }
                 .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(theme.toolGroupBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.border.opacity(0.5), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Provision Group (collapsed log output)
+
+struct ProvisionGroupView: View {
+    let logs: [AgentMessage]
+    var isActive: Bool = false
+    @Environment(\.theme) private var theme
+    @State private var isExpanded = false
+
+    private var lastLine: String {
+        logs.last?.textContent ?? ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 12)
+
+                    if isActive {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Image(systemName: "cloud.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(isActive ? theme.yellow : theme.green)
+
+                    Text(isActive ? "Provisioning..." : "Provisioned")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.text)
+
+                    Text("\(logs.count) \(logs.count == 1 ? "line" : "lines")")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+
+                    if !isExpanded {
+                        Text(lastLine)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ScrollView {
+                    Text(logs.map(\.textContent).joined(separator: "\n"))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 8)
             }
         }
