@@ -139,6 +139,49 @@ final class AppState {
         await createWorktree(branch: "flight/\(adj)-\(noun)-\(suffix)")
     }
 
+    func listRunningWorkspaces() async -> [String] {
+        guard let output = try? await ShellService.run("coder list --output json") else { return [] }
+        guard let data = output.data(using: .utf8),
+              let workspaces = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return workspaces.compactMap { ws -> String? in
+            guard let name = ws["name"] as? String,
+                  let status = ws["status"] as? String,
+                  status == "Running" else { return nil }
+            return name
+        }
+    }
+
+    func attachToWorkspace(workspaceName: String, initialPrompt: String) {
+        guard let project = selectedProject ?? projects.first else { return }
+        guard let remote = remoteMode else {
+            showError("Remote mode not configured.")
+            return
+        }
+
+        let worktree = Worktree(
+            branch: workspaceName, path: workspaceName,
+            status: .idle, isRemote: true, workspaceName: workspaceName
+        )
+        let conversation = worktree.ensureConversation()
+        project.worktrees.append(worktree)
+        selectedWorktreeID = worktree.id
+
+        let connectCmd = remote.connect.replacingOccurrences(of: "{workspace}", with: workspaceName)
+        let connectPrefix = connectCmd.components(separatedBy: " ")
+
+        saveConfig()
+
+        let connMsg = AgentMessage(role: .system, content: .text("Connecting to \(workspaceName)..."))
+        conversation.messages.append(connMsg)
+
+        do {
+            try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
+            conversation.agent?.send(message: initialPrompt)
+        } catch {
+            showError("Failed to connect: \(error.localizedDescription)")
+        }
+    }
+
     func createRemoteWorktree(initialPrompt: String) {
         guard let project = selectedProject ?? projects.first else { return }
         guard let remote = remoteMode else {
@@ -214,9 +257,14 @@ final class AppState {
         }
 
         if worktree.isRemote, let workspaceName = worktree.workspaceName, let remote = remoteMode {
-            // Run teardown command
-            let teardownCmd = remote.teardown.replacingOccurrences(of: "{workspace}", with: workspaceName)
-            _ = try? await ShellService.run(teardownCmd)
+            // Only teardown if no other worktrees use this workspace
+            let othersOnSameWorkspace = allWorktrees.contains {
+                $0.id != worktree.id && $0.workspaceName == workspaceName
+            }
+            if !othersOnSameWorkspace {
+                let teardownCmd = remote.teardown.replacingOccurrences(of: "{workspace}", with: workspaceName)
+                _ = try? await ShellService.run(teardownCmd)
+            }
         } else {
             do {
                 try await GitService.removeWorktree(
