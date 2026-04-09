@@ -136,6 +136,11 @@ struct WorktreeRow: View {
 
             if let ciStatus = worktree.ciStatus {
                 CIBadge(conclusion: ciStatus.overall)
+                    .help(ciTooltip)
+            }
+
+            if let decision = worktree.prStatus?.reviewDecision {
+                ReviewBadge(decision: decision)
             }
 
             Text(statusLabel)
@@ -169,6 +174,17 @@ struct WorktreeRow: View {
         if worktree.status == .error { return theme.red }
         return theme.secondaryText
     }
+
+    private var ciTooltip: String {
+        guard let ci = worktree.ciStatus else { return "" }
+        let failed = ci.failedCheckNames
+        if failed.isEmpty && ci.overall == .success {
+            return "All checks passed"
+        } else if !failed.isEmpty {
+            return "Failed: \(failed.joined(separator: ", "))"
+        }
+        return "Checks pending"
+    }
 }
 
 struct CIBadge: View {
@@ -194,6 +210,43 @@ struct CIBadge: View {
         case .success: return theme.green
         case .failure: return theme.red
         case .pending: return theme.yellow
+        }
+    }
+}
+
+struct ReviewBadge: View {
+    let decision: String
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Image(systemName: iconName)
+            .foregroundStyle(iconColor)
+            .font(.caption)
+            .help(label)
+    }
+
+    private var iconName: String {
+        switch decision {
+        case "APPROVED": return "person.fill.checkmark"
+        case "CHANGES_REQUESTED": return "person.fill.xmark"
+        default: return "person.fill.questionmark"
+        }
+    }
+
+    private var iconColor: Color {
+        switch decision {
+        case "APPROVED": return theme.green
+        case "CHANGES_REQUESTED": return theme.orange
+        default: return theme.secondaryText
+        }
+    }
+
+    private var label: String {
+        switch decision {
+        case "APPROVED": return "Approved"
+        case "CHANGES_REQUESTED": return "Changes requested"
+        case "REVIEW_REQUIRED": return "Review required"
+        default: return "Pending review"
         }
     }
 }

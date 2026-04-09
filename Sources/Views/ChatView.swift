@@ -140,6 +140,10 @@ struct ChatView: View {
                 fixCIBar
             }
 
+            if worktree.prStatus?.reviewDecision == "CHANGES_REQUESTED" {
+                reviewBar
+            }
+
             Divider()
 
             InputBarView(state: state, worktree: worktree)
@@ -246,9 +250,16 @@ struct ChatView: View {
             }
             Spacer()
             if let prNumber = worktree.prNumber {
-                Label("PR #\(prNumber)", systemImage: "arrow.triangle.pull")
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                HStack(spacing: 4) {
+                    Label("PR #\(prNumber)", systemImage: "arrow.triangle.pull")
+                    if let decision = worktree.prStatus?.reviewDecision {
+                        Image(systemName: reviewDecisionIcon(decision))
+                            .foregroundStyle(reviewDecisionColor(decision))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(theme.secondaryText)
+                .help(prHeaderTooltip)
             }
             Text(headerStatusLabel)
                 .font(.caption)
@@ -281,23 +292,52 @@ struct ChatView: View {
     }
 
     private var fixCIBar: some View {
-        HStack {
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(theme.red)
-            Text("CI checks failed")
-                .font(.callout)
-                .foregroundStyle(theme.text)
-            Spacer()
-            Button("Fix CI") {
-                Task { await state.fixCI(for: worktree) }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(theme.red)
+                Text("CI checks failed")
+                    .font(.callout)
+                    .foregroundStyle(theme.text)
+                Spacer()
+                Button("Fix CI") {
+                    Task { await state.fixCI(for: worktree) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(theme.red)
+                .controlSize(.small)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(theme.red)
-            .controlSize(.small)
+            if let failedNames = worktree.ciStatus?.failedCheckNames, !failedNames.isEmpty {
+                Text(failedNames.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryText)
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
         .background(theme.red.opacity(0.1))
+    }
+
+    private var reviewBar: some View {
+        HStack {
+            Image(systemName: "exclamationmark.bubble.fill")
+                .foregroundStyle(theme.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Changes requested")
+                    .font(.callout)
+                    .foregroundStyle(theme.text)
+                if let names = worktree.prStatus?.changesRequestedBy, !names.isEmpty {
+                    Text("by \(names.joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(theme.orange.opacity(0.1))
     }
 
     private var headerStatusLabel: String {
@@ -322,6 +362,53 @@ struct ChatView: View {
 
     private var statusColor: Color {
         headerStatusColor
+    }
+
+    // MARK: - PR Helpers
+
+    private func reviewDecisionIcon(_ decision: String) -> String {
+        switch decision {
+        case "APPROVED": return "checkmark.circle.fill"
+        case "CHANGES_REQUESTED": return "exclamationmark.triangle.fill"
+        case "REVIEW_REQUIRED": return "eye.fill"
+        default: return "eye.fill"
+        }
+    }
+
+    private func reviewDecisionColor(_ decision: String) -> Color {
+        switch decision {
+        case "APPROVED": return theme.green
+        case "CHANGES_REQUESTED": return theme.orange
+        default: return theme.secondaryText
+        }
+    }
+
+    private var prHeaderTooltip: String {
+        var parts: [String] = []
+        if let ci = worktree.ciStatus {
+            let failed = ci.failedCheckNames
+            if failed.isEmpty && ci.overall == .success {
+                parts.append("All checks passed")
+            } else if !failed.isEmpty {
+                parts.append("Failed: \(failed.joined(separator: ", "))")
+            } else {
+                parts.append("Checks pending")
+            }
+        }
+        if let status = worktree.prStatus {
+            if let decision = status.reviewDecision {
+                switch decision {
+                case "APPROVED":
+                    parts.append("Approved by \(status.approvedBy.joined(separator: ", "))")
+                case "CHANGES_REQUESTED":
+                    parts.append("Changes requested by \(status.changesRequestedBy.joined(separator: ", "))")
+                case "REVIEW_REQUIRED":
+                    parts.append("Review required")
+                default: break
+                }
+            }
+        }
+        return parts.isEmpty ? "" : parts.joined(separator: "\n")
     }
 }
 

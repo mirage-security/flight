@@ -493,6 +493,16 @@ final class AppState {
         } catch {
             // Silently fail CI checks — they'll retry on next poll
         }
+
+        do {
+            let status = try await forge.getPRStatus(
+                prNumber: prNumber,
+                repoPath: project.path
+            )
+            worktree.prStatus = status
+        } catch {
+            // Silently fail — retries on next poll
+        }
     }
 
     func fixCI(for worktree: Worktree) async {

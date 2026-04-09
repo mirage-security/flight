@@ -122,6 +122,42 @@ struct ForgejoForge: ForgeProvider {
         return logOutput.isEmpty ? "No failed job logs found." : logOutput
     }
 
+    func getPRStatus(prNumber: Int, repoPath: String) async throws -> PRStatus {
+        let (owner, repo) = try await parseRemote(in: repoPath)
+
+        let rawReviews: [[String: Any]] = try await apiRequest(
+            method: "GET",
+            path: "/api/v1/repos/\(owner)/\(repo)/pulls/\(prNumber)/reviews"
+        )
+
+        // Forgejo returns reviews with body, state, user. Keep only latest per user.
+        var latestByUser: [String: PRReview] = [:]
+        for r in rawReviews {
+            let author = (r["user"] as? [String: Any])?["login"] as? String ?? "unknown"
+            let state = r["state"] as? String ?? "PENDING"
+            // Map Forgejo states to GitHub-style
+            let mapped: String = switch state.uppercased() {
+            case "APPROVED": "APPROVED"
+            case "REQUEST_CHANGES": "CHANGES_REQUESTED"
+            case "COMMENT": "COMMENTED"
+            default: "PENDING"
+            }
+            latestByUser[author] = PRReview(author: author, state: mapped)
+        }
+
+        let reviews = Array(latestByUser.values)
+        // Derive decision from reviews
+        let decision: String? = if reviews.contains(where: { $0.state == "CHANGES_REQUESTED" }) {
+            "CHANGES_REQUESTED"
+        } else if reviews.contains(where: { $0.state == "APPROVED" }) {
+            "APPROVED"
+        } else {
+            nil
+        }
+
+        return PRStatus(reviews: reviews, reviewDecision: decision)
+    }
+
     func getPRNumber(branch: String, repoPath: String) async -> Int? {
         guard let (owner, repo) = try? await parseRemote(in: repoPath) else { return nil }
         guard let pulls: [[String: Any]] = try? await apiRequest(

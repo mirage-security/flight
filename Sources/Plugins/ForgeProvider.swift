@@ -17,6 +17,9 @@ protocol ForgeProvider {
     /// Gets failed CI logs for a PR's latest run.
     func getFailedLogs(prNumber: Int, repoPath: String) async throws -> String
 
+    /// Gets PR review status (reviews, review decision).
+    func getPRStatus(prNumber: Int, repoPath: String) async throws -> PRStatus
+
     /// Looks up the PR number for a branch. Returns nil if no PR exists.
     func getPRNumber(branch: String, repoPath: String) async -> Int?
 }

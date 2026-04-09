@@ -19,6 +19,7 @@ final class Worktree: Identifiable {
     var activeConversationID: UUID?
     var prNumber: Int?
     var ciStatus: CIStatus?
+    var prStatus: PRStatus?
 
     // Remote mode
     var isRemote: Bool

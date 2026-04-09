@@ -54,6 +54,29 @@ struct GitHubForge: ForgeProvider {
         return "Could not determine run ID from CI check URL."
     }
 
+    func getPRStatus(prNumber: Int, repoPath: String) async throws -> PRStatus {
+        let output = try await ShellService.run(
+            "gh pr view \(prNumber) --json latestReviews,reviewDecision",
+            in: repoPath
+        )
+        guard let data = output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return PRStatus(reviews: [], reviewDecision: nil)
+        }
+
+        var reviews: [PRReview] = []
+        if let rawReviews = json["latestReviews"] as? [[String: Any]] {
+            for r in rawReviews {
+                let author = (r["author"] as? [String: Any])?["login"] as? String ?? "unknown"
+                let state = r["state"] as? String ?? "PENDING"
+                reviews.append(PRReview(author: author, state: state))
+            }
+        }
+
+        let decision = json["reviewDecision"] as? String
+        return PRStatus(reviews: reviews, reviewDecision: decision)
+    }
+
     func getPRNumber(branch: String, repoPath: String) async -> Int? {
         guard let output = try? await ShellService.run(
             "gh pr view '\(branch)' --json number --jq .number",
