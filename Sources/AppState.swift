@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+import os.log
+
+private let ciLog = Logger(subsystem: "flight", category: "checkCI")
 
 @Observable
 final class AppState {
@@ -60,6 +63,13 @@ final class AppState {
         Task {
             for project in projects where project.forgeConfig == nil {
                 await detectForge(for: project)
+            }
+        }
+
+        // Fetch PR/CI status immediately for all worktrees with PRs
+        Task {
+            for worktree in allWorktrees where worktree.prNumber != nil {
+                await checkCI(for: worktree)
             }
         }
     }
@@ -482,7 +492,12 @@ final class AppState {
     func checkCI(for worktree: Worktree) async {
         guard let prNumber = worktree.prNumber,
               let project = projectForWorktree(worktree),
-              let forge = project.forgeProvider else { return }
+              let forge = project.forgeProvider else {
+            ciLog.info("[checkCI] skipped for \(worktree.branch): prNumber=\(worktree.prNumber ?? -1), project=\(self.projectForWorktree(worktree)?.name ?? "nil"), hasForge=\(self.projectForWorktree(worktree)?.forgeProvider != nil)")
+            return
+        }
+
+        ciLog.info("[checkCI] running for PR #\(prNumber) on \(project.name) (path: \(project.path))")
 
         do {
             let checks = try await forge.getChecks(
@@ -490,8 +505,9 @@ final class AppState {
                 repoPath: project.path
             )
             worktree.ciStatus = CIStatus(checks: checks)
+            ciLog.info("[checkCI] checks: \(checks.count) results")
         } catch {
-            // Silently fail CI checks — they'll retry on next poll
+            ciLog.info("[checkCI] getChecks failed: \(error)")
         }
 
         do {
@@ -500,8 +516,9 @@ final class AppState {
                 repoPath: project.path
             )
             worktree.prStatus = status
+            ciLog.info("[checkCI] prStatus: decision=\(status.reviewDecision ?? "nil"), reviews=\(status.reviews.count)")
         } catch {
-            // Silently fail — retries on next poll
+            ciLog.info("[checkCI] getPRStatus failed: \(error)")
         }
     }
 

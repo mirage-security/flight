@@ -21,7 +21,7 @@ struct GitHubForge: ForgeProvider {
 
     func getChecks(prNumber: Int, repoPath: String) async throws -> [CICheck] {
         let output = try await ShellService.run(
-            "gh pr checks \(prNumber) --json name,state,conclusion",
+            "gh pr checks \(prNumber) --json name,state,link",
             in: repoPath
         )
         guard let data = output.data(using: .utf8) else { return [] }
@@ -30,7 +30,7 @@ struct GitHubForge: ForgeProvider {
 
     func getFailedLogs(prNumber: Int, repoPath: String) async throws -> String {
         let checksOutput = try await ShellService.run(
-            "gh pr checks \(prNumber) --json name,state,conclusion,detailsUrl --jq '.[] | select(.conclusion == \"failure\") | .detailsUrl'",
+            "gh pr checks \(prNumber) --json name,state,link --jq '.[] | select(.state == \"FAILURE\") | .link'",
             in: repoPath
         )
 
@@ -56,7 +56,7 @@ struct GitHubForge: ForgeProvider {
 
     func getPRStatus(prNumber: Int, repoPath: String) async throws -> PRStatus {
         let output = try await ShellService.run(
-            "gh pr view \(prNumber) --json latestReviews,reviewDecision",
+            "gh pr view \(prNumber) --json latestReviews,reviewDecision,url",
             in: repoPath
         )
         guard let data = output.data(using: .utf8),
@@ -73,8 +73,27 @@ struct GitHubForge: ForgeProvider {
             }
         }
 
+        // Fetch inline review comments
+        var comments: [PRComment] = []
+        if let commentsOutput = try? await ShellService.run(
+            "gh api repos/{owner}/{repo}/pulls/\(prNumber)/comments --jq '.[] | [.user.login, .path, (.line | tostring), .body] | @tsv'",
+            in: repoPath
+        ) {
+            for line in commentsOutput.components(separatedBy: "\n") where !line.isEmpty {
+                let parts = line.components(separatedBy: "\t")
+                guard parts.count >= 4 else { continue }
+                comments.append(PRComment(
+                    author: parts[0],
+                    body: parts[3],
+                    path: parts[1].isEmpty ? nil : parts[1],
+                    line: Int(parts[2])
+                ))
+            }
+        }
+
         let decision = json["reviewDecision"] as? String
-        return PRStatus(reviews: reviews, reviewDecision: decision)
+        let url = json["url"] as? String
+        return PRStatus(reviews: reviews, reviewDecision: decision, url: url, comments: comments)
     }
 
     func getPRNumber(branch: String, repoPath: String) async -> Int? {

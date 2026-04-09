@@ -136,12 +136,8 @@ struct ChatView: View {
                 remoteSessionBar
             }
 
-            if worktree.ciStatus?.overall == .failure {
-                fixCIBar
-            }
-
-            if worktree.prStatus?.reviewDecision == "CHANGES_REQUESTED" {
-                reviewBar
+            if worktree.prNumber != nil {
+                prStatusStrip
             }
 
             Divider()
@@ -249,18 +245,6 @@ struct ChatView: View {
                 .help("Open remote session in Terminal (Cmd+Shift+R)")
             }
             Spacer()
-            if let prNumber = worktree.prNumber {
-                HStack(spacing: 4) {
-                    Label("PR #\(prNumber)", systemImage: "arrow.triangle.pull")
-                    if let decision = worktree.prStatus?.reviewDecision {
-                        Image(systemName: reviewDecisionIcon(decision))
-                            .foregroundStyle(reviewDecisionColor(decision))
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(theme.secondaryText)
-                .help(prHeaderTooltip)
-            }
             Text(headerStatusLabel)
                 .font(.caption)
                 .foregroundStyle(headerStatusColor)
@@ -291,53 +275,301 @@ struct ChatView: View {
         .background(theme.accent.opacity(0.1))
     }
 
-    private var fixCIBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(theme.red)
-                Text("CI checks failed")
-                    .font(.callout)
-                    .foregroundStyle(theme.text)
-                Spacer()
-                Button("Fix CI") {
-                    Task { await state.fixCI(for: worktree) }
+    // MARK: - PR Status Strip
+
+    @State private var showingCIPopover = false
+    @State private var showingCommentsPopover = false
+
+    private var prStatusStrip: some View {
+        HStack(spacing: 8) {
+            // Clickable PR link
+            if let prNumber = worktree.prNumber {
+                Button {
+                    if let urlStr = worktree.prStatus?.url, let url = URL(string: urlStr) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.pull")
+                            .font(.system(size: 10))
+                        Text(verbatim: "PR #\(prNumber)")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help(worktree.prStatus?.url ?? "")
+            }
+
+            // CI pill with embedded Resolve
+            ciChicklet
+
+            // Comments pill with embedded Resolve
+            commentsChicklet
+
+            // Review decision (compact, no action)
+            reviewPill
+
+            Spacer()
+
+            // Ready to merge
+            if worktree.prStatus?.reviewDecision == "APPROVED",
+               worktree.ciStatus?.overall == .success {
+                Button {
+                    if let urlStr = worktree.prStatus?.url, let url = URL(string: urlStr) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text("Ready to Merge")
+                            .font(.system(size: 11, weight: .medium))
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(theme.red)
+                .tint(theme.green)
                 .controlSize(.small)
             }
-            if let failedNames = worktree.ciStatus?.failedCheckNames, !failedNames.isEmpty {
-                Text(failedNames.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
-                    .lineLimit(2)
-            }
         }
         .padding(.horizontal)
-        .padding(.vertical, 6)
-        .background(theme.red.opacity(0.1))
+        .padding(.vertical, 7)
     }
 
-    private var reviewBar: some View {
-        HStack {
-            Image(systemName: "exclamationmark.bubble.fill")
-                .foregroundStyle(theme.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Changes requested")
-                    .font(.callout)
-                    .foregroundStyle(theme.text)
-                if let names = worktree.prStatus?.changesRequestedBy, !names.isEmpty {
-                    Text("by \(names.joined(separator: ", "))")
-                        .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+    // MARK: - Chicklets
+
+    @ViewBuilder
+    private var ciChicklet: some View {
+        let ci = worktree.ciStatus
+        if let ci {
+            let failed = ci.failedCheckNames
+            let color: Color = switch ci.overall {
+            case .success: theme.green
+            case .failure: theme.red
+            case .pending: theme.yellow
+            }
+            let icon: String = switch ci.overall {
+            case .success: "checkmark.circle.fill"
+            case .failure: "xmark.circle.fill"
+            case .pending: "circle.dotted"
+            }
+            let label: String = switch ci.overall {
+            case .success: "\(ci.passedCount) Checks Passing"
+            case .failure: "\(failed.count) Checks Failing"
+            case .pending: "CI Running"
+            }
+
+            HStack(spacing: 0) {
+                Button { showingCIPopover.toggle() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: icon)
+                            .font(.system(size: 10))
+                        Text(label)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingCIPopover, arrowEdge: .bottom) {
+                    ciPopoverContent
+                }
+
+                if ci.overall == .failure {
+                    Divider()
+                        .frame(height: 14)
+                        .padding(.horizontal, 2)
+                    Button { resolveCI() } label: {
+                        Text("Resolve")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(color)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            Spacer()
+            .background(color.opacity(0.1))
+            .clipShape(Capsule())
         }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
-        .background(theme.orange.opacity(0.1))
+    }
+
+    @ViewBuilder
+    private var commentsChicklet: some View {
+        let comments = worktree.prStatus?.inlineComments ?? []
+        if !comments.isEmpty {
+            let color = theme.accent
+
+            HStack(spacing: 0) {
+                Button { showingCommentsPopover.toggle() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 10))
+                        Text("\(comments.count) Comment\(comments.count == 1 ? "" : "s")")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingCommentsPopover, arrowEdge: .bottom) {
+                    commentsPopoverContent
+                }
+
+                Divider()
+                    .frame(height: 14)
+                    .padding(.horizontal, 2)
+                Button { resolveComments() } label: {
+                    Text("Resolve")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(color.opacity(0.1))
+            .clipShape(Capsule())
+        }
+    }
+
+    private var reviewPill: some View {
+        let status = worktree.prStatus
+        let icon: String
+        let label: String
+        let color: Color
+
+        if let decision = status?.reviewDecision {
+            switch decision {
+            case "APPROVED":
+                icon = "checkmark.circle.fill"
+                label = "Approved"
+                color = theme.green
+            case "CHANGES_REQUESTED":
+                icon = "exclamationmark.triangle.fill"
+                label = "Changes Requested"
+                color = theme.orange
+            case "REVIEW_REQUIRED":
+                icon = "eye.fill"
+                label = "Review Required"
+                color = theme.yellow
+            default:
+                icon = "eye.fill"
+                label = "Pending"
+                color = theme.secondaryText
+            }
+        } else {
+            return AnyView(EmptyView())
+        }
+
+        return AnyView(
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.1))
+            .clipShape(Capsule())
+        )
+    }
+
+    // MARK: - Popovers
+
+    private var ciPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("CI Checks")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.text)
+            Divider()
+            if let checks = worktree.ciStatus?.checks {
+                ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
+                    HStack(spacing: 6) {
+                        Image(systemName: check.state == "SUCCESS" ? "checkmark.circle.fill" :
+                                check.state == "FAILURE" ? "xmark.circle.fill" :
+                                check.state == "SKIPPED" ? "forward.fill" : "circle.dotted")
+                            .font(.system(size: 10))
+                            .foregroundStyle(check.state == "SUCCESS" ? theme.green :
+                                check.state == "FAILURE" ? theme.red :
+                                check.state == "SKIPPED" ? theme.secondaryText : theme.yellow)
+                        Text(check.name)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.text)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 200)
+    }
+
+    private var commentsPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Review Comments")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.text)
+            Divider()
+            if let comments = worktree.prStatus?.inlineComments {
+                ForEach(Array(comments.enumerated()), id: \.offset) { _, comment in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(comment.author)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(theme.text)
+                            if let path = comment.path {
+                                Text(URL(fileURLWithPath: path).lastPathComponent + (comment.line.map { ":\($0)" } ?? ""))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.secondaryText)
+                            }
+                        }
+                        Text(comment.body)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                    if comment.body != comments.last?.body {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 450)
+    }
+
+    // MARK: - Actions
+
+    private func resolveCI() {
+        let failedChecks = worktree.ciStatus?.checks.filter { $0.state == "FAILURE" } ?? []
+        var message = "Please address these failing CI checks:\n\n"
+        for check in failedChecks {
+            message += "- **\(check.name)**"
+            if let link = check.link { message += ": \(link)" }
+            message += "\n"
+        }
+        message += ""
+        if let conv = conversation {
+            state.sendMessage(message, to: worktree, conversation: conv)
+        }
+    }
+
+    private func resolveComments() {
+        var message = "Please address the PR review feedback:\n\n"
+        if let comments = worktree.prStatus?.inlineComments {
+            for c in comments {
+                let location = [c.path, c.line.map { ":\($0)" }].compactMap { $0 }.joined()
+                message += "- **\(c.author)** on `\(location)`: \(c.body)\n\n"
+            }
+        }
+        if let conv = conversation {
+            state.sendMessage(message, to: worktree, conversation: conv)
+        }
     }
 
     private var headerStatusLabel: String {
@@ -364,52 +596,6 @@ struct ChatView: View {
         headerStatusColor
     }
 
-    // MARK: - PR Helpers
-
-    private func reviewDecisionIcon(_ decision: String) -> String {
-        switch decision {
-        case "APPROVED": return "checkmark.circle.fill"
-        case "CHANGES_REQUESTED": return "exclamationmark.triangle.fill"
-        case "REVIEW_REQUIRED": return "eye.fill"
-        default: return "eye.fill"
-        }
-    }
-
-    private func reviewDecisionColor(_ decision: String) -> Color {
-        switch decision {
-        case "APPROVED": return theme.green
-        case "CHANGES_REQUESTED": return theme.orange
-        default: return theme.secondaryText
-        }
-    }
-
-    private var prHeaderTooltip: String {
-        var parts: [String] = []
-        if let ci = worktree.ciStatus {
-            let failed = ci.failedCheckNames
-            if failed.isEmpty && ci.overall == .success {
-                parts.append("All checks passed")
-            } else if !failed.isEmpty {
-                parts.append("Failed: \(failed.joined(separator: ", "))")
-            } else {
-                parts.append("Checks pending")
-            }
-        }
-        if let status = worktree.prStatus {
-            if let decision = status.reviewDecision {
-                switch decision {
-                case "APPROVED":
-                    parts.append("Approved by \(status.approvedBy.joined(separator: ", "))")
-                case "CHANGES_REQUESTED":
-                    parts.append("Changes requested by \(status.changesRequestedBy.joined(separator: ", "))")
-                case "REVIEW_REQUIRED":
-                    parts.append("Review required")
-                default: break
-                }
-            }
-        }
-        return parts.isEmpty ? "" : parts.joined(separator: "\n")
-    }
 }
 
 // MARK: - Tool Group (collapsed chain)

@@ -131,7 +131,10 @@ final class ClaudeAgent {
             claudeArgs += ["--input-format", "stream-json"]
             claudeArgs += ["--allowedTools", "Write,Edit,Read,Glob,Grep,Agent,Task,ToolSearch,Skill,EnterPlanMode,ExitPlanMode,EnterWorktree,ExitWorktree,NotebookEdit,WebSearch,WebFetch,TodoWrite,AskUserQuestion"]
             claudeArgs += ["--permission-mode", "auto"]
-            claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"github.com\",\"api.github.com\"]}}}"]
+            // Sandbox: filesystem scoped to cwd (worktree), network domains approved
+            // via control_request handler. allowUnsandboxedCommands=false makes the
+            // CLI ignore dangerouslyDisableSandbox entirely — no escape hatch.
+            claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"autoAllow\":true,\"allowUnsandboxedCommands\":false}}"]
         }
 
         if let sessionID {

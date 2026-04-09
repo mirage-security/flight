@@ -2,8 +2,8 @@ import Foundation
 
 struct CICheck: Codable {
     let name: String
-    let state: String
-    let conclusion: String?
+    let state: String  // SUCCESS, FAILURE, PENDING, SKIPPED, etc.
+    let link: String?
 }
 
 struct CIStatus {
@@ -11,17 +11,27 @@ struct CIStatus {
 
     var overall: CIConclusion {
         if checks.isEmpty { return .pending }
-        if checks.contains(where: { $0.conclusion == "failure" || $0.conclusion == "cancelled" }) {
+        let meaningful = checks.filter { $0.state != "SKIPPED" }
+        if meaningful.isEmpty { return .success }
+        if meaningful.contains(where: { $0.state == "FAILURE" }) {
             return .failure
         }
-        if checks.allSatisfy({ $0.state == "completed" && $0.conclusion == "success" }) {
+        if meaningful.allSatisfy({ $0.state == "SUCCESS" }) {
             return .success
         }
         return .pending
     }
 
     var failedCheckNames: [String] {
-        checks.filter { $0.conclusion == "failure" }.map(\.name)
+        checks.filter { $0.state == "FAILURE" }.map(\.name)
+    }
+
+    var passedCount: Int {
+        checks.filter { $0.state == "SUCCESS" }.count
+    }
+
+    var totalMeaningful: Int {
+        checks.filter { $0.state != "SKIPPED" }.count
     }
 }
 

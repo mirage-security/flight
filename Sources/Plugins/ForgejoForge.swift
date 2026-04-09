@@ -64,15 +64,15 @@ struct ForgejoForge: ForgeProvider {
         return statuses.compactMap { status in
             guard let name = status["context"] as? String,
                   let state = status["status"] as? String else { return nil }
-            // Map Forgejo states (pending/success/error/failure/warning) to our model
-            let conclusion: String? = switch state {
-            case "success": "success"
-            case "failure", "error": "failure"
-            case "warning": "neutral"
-            default: nil  // pending
+            // Map Forgejo states to match GitHub's gh pr checks output
+            let mapped = switch state {
+            case "success": "SUCCESS"
+            case "failure", "error": "FAILURE"
+            case "pending": "PENDING"
+            default: "PENDING"
             }
-            let ciState = (conclusion != nil) ? "completed" : "pending"
-            return CICheck(name: name, state: ciState, conclusion: conclusion)
+            let link = status["target_url"] as? String
+            return CICheck(name: name, state: mapped, link: link)
         }
     }
 

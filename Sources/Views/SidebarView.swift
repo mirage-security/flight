@@ -49,6 +49,9 @@ struct SidebarView: View {
                                 .onTapGesture {
                                     state.selectedWorktreeID = worktree.id
                                     state.selectedProjectID = project.id
+                                    if worktree.prNumber != nil {
+                                        Task { await state.checkCI(for: worktree) }
+                                    }
                                 }
                                 .contextMenu {
                                     worktreeContextMenu(worktree: worktree)
@@ -134,13 +137,8 @@ struct WorktreeRow: View {
 
             Spacer()
 
-            if let ciStatus = worktree.ciStatus {
-                CIBadge(conclusion: ciStatus.overall)
-                    .help(ciTooltip)
-            }
-
-            if let decision = worktree.prStatus?.reviewDecision {
-                ReviewBadge(decision: decision)
+            if worktree.prNumber != nil {
+                prBadge
             }
 
             Text(statusLabel)
@@ -175,78 +173,49 @@ struct WorktreeRow: View {
         return theme.secondaryText
     }
 
-    private var ciTooltip: String {
-        guard let ci = worktree.ciStatus else { return "" }
-        let failed = ci.failedCheckNames
-        if failed.isEmpty && ci.overall == .success {
-            return "All checks passed"
-        } else if !failed.isEmpty {
-            return "Failed: \(failed.joined(separator: ", "))"
+    /// Single compact badge in the sidebar showing the worst PR status
+    private var prBadge: some View {
+        let icon: String
+        let color: Color
+        let tooltip: String
+
+        // Priority: CI failure > changes requested > review required > CI pending > all good
+        if worktree.ciStatus?.overall == .failure {
+            let names = worktree.ciStatus?.failedCheckNames ?? []
+            icon = "xmark.circle.fill"
+            color = theme.red
+            tooltip = "CI failing: \(names.joined(separator: ", "))"
+        } else if worktree.prStatus?.reviewDecision == "CHANGES_REQUESTED" {
+            let names = worktree.prStatus?.changesRequestedBy ?? []
+            icon = "exclamationmark.triangle.fill"
+            color = theme.orange
+            tooltip = "Changes requested by \(names.joined(separator: ", "))"
+        } else if worktree.prStatus?.reviewDecision == "REVIEW_REQUIRED" {
+            icon = "eye.fill"
+            color = theme.yellow
+            tooltip = "Review required"
+        } else if worktree.ciStatus?.overall == .pending {
+            icon = "circle.dotted"
+            color = theme.yellow
+            tooltip = "CI running"
+        } else if worktree.ciStatus?.overall == .success,
+                  worktree.prStatus?.reviewDecision == "APPROVED" {
+            icon = "checkmark.circle.fill"
+            color = theme.green
+            tooltip = "Ready to merge"
+        } else if worktree.ciStatus?.overall == .success {
+            icon = "checkmark.circle.fill"
+            color = theme.green
+            tooltip = "CI passing"
+        } else {
+            icon = "circle.dotted"
+            color = theme.secondaryText
+            tooltip = "PR #\(worktree.prNumber ?? 0)"
         }
-        return "Checks pending"
-    }
-}
 
-struct CIBadge: View {
-    let conclusion: CIConclusion
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        Image(systemName: iconName)
-            .foregroundStyle(iconColor)
+        return Image(systemName: icon)
+            .foregroundStyle(color)
             .font(.caption)
-    }
-
-    private var iconName: String {
-        switch conclusion {
-        case .success: return "checkmark.circle.fill"
-        case .failure: return "xmark.circle.fill"
-        case .pending: return "circle.dotted"
-        }
-    }
-
-    private var iconColor: Color {
-        switch conclusion {
-        case .success: return theme.green
-        case .failure: return theme.red
-        case .pending: return theme.yellow
-        }
-    }
-}
-
-struct ReviewBadge: View {
-    let decision: String
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        Image(systemName: iconName)
-            .foregroundStyle(iconColor)
-            .font(.caption)
-            .help(label)
-    }
-
-    private var iconName: String {
-        switch decision {
-        case "APPROVED": return "person.fill.checkmark"
-        case "CHANGES_REQUESTED": return "person.fill.xmark"
-        default: return "person.fill.questionmark"
-        }
-    }
-
-    private var iconColor: Color {
-        switch decision {
-        case "APPROVED": return theme.green
-        case "CHANGES_REQUESTED": return theme.orange
-        default: return theme.secondaryText
-        }
-    }
-
-    private var label: String {
-        switch decision {
-        case "APPROVED": return "Approved"
-        case "CHANGES_REQUESTED": return "Changes requested"
-        case "REVIEW_REQUIRED": return "Review required"
-        default: return "Pending review"
-        }
+            .help(tooltip)
     }
 }
