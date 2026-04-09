@@ -146,7 +146,7 @@ Sources/
 Each user message spawns a new `claude -p` process with `--output-format stream-json`. Subsequent messages use `--resume <session_id>` to maintain conversation context. This one-process-per-turn model avoids the complexity of long-lived bidirectional streaming.
 
 **Local**: Process runs directly with sandbox enabled.
-**Remote**: Process runs via SSH tunnel (`coder ssh workspace -- claude -p ...`). Messages are base64-encoded for safe shell transport.
+**Remote**: Process runs via any SSH-compatible tunnel. Messages are base64-encoded for safe shell transport. As long as your connect command provides a pipe to the remote machine, it works.
 
 ### Data storage
 
