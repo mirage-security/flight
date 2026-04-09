@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import SwiftUI
 
@@ -495,9 +494,9 @@ final class AppState {
 
     // MARK: - Remote Session
 
-    /// Opens an interactive `claude` session on the remote workspace in
-    /// Terminal.app. Because this is a full (non `-p`) session it registers
-    /// with the Anthropic backend and shows up in the Claude Code mobile app.
+    /// Starts a detached interactive `claude` session on the remote workspace
+    /// via SSH. Because it runs as a full (non `-p`) process it registers with
+    /// the Anthropic backend and appears in the Claude Code mobile app.
     func openRemoteSession(for worktree: Worktree) {
         guard worktree.isRemote,
               let workspaceName = worktree.workspaceName,
@@ -514,29 +513,25 @@ final class AppState {
             claudeArgs += " --resume \(sessionID)"
         }
 
-        let command = "\(connectCmd) \(claudeArgs)"
-        let escaped = command.replacingOccurrences(of: "\\", with: "\\\\")
-                             .replacingOccurrences(of: "\"", with: "\\\"")
-
-        let script = """
-        tell application "Terminal"
-            do script "\(escaped)"
-            activate
-        end tell
-        """
-
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if let error {
-                showError("Failed to open Terminal: \(error)")
-                return
-            }
-        }
+        // nohup + & detaches claude from the SSH session so it keeps
+        // running after the connection closes.
+        let command = "\(connectCmd) \"nohup \(claudeArgs) </dev/null &>/dev/null &\""
 
         if let conversation {
-            let msg = AgentMessage(role: .system, content: .text("Opened remote session in Terminal"))
+            let msg = AgentMessage(role: .system, content: .text("Starting remote session on \(workspaceName)..."))
             conversation.messages.append(msg)
+        }
+
+        Task {
+            do {
+                try await ShellService.run(command)
+                if let conversation {
+                    let msg = AgentMessage(role: .system, content: .text("Remote session started — available in Claude Code mobile app"))
+                    conversation.messages.append(msg)
+                }
+            } catch {
+                showError("Failed to start remote session: \(error.localizedDescription)")
+            }
         }
     }
 
