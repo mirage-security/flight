@@ -129,6 +129,7 @@ final class ClaudeAgent {
         // Local: use stdin for input. Remote: pass message as prompt arg (stdin over SSH is unreliable)
         if !isRemote {
             claudeArgs += ["--input-format", "stream-json"]
+            claudeArgs += ["--allowedTools", "Write", "Edit", "Bash", "Read", "Glob", "Grep", "Agent", "Task", "ToolSearch", "Skill", "EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree", "NotebookEdit", "WebSearch", "WebFetch", "TodoWrite", "AskUserQuestion"]
             claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"github.com\",\"api.github.com\"]}}}"]
         }
 
