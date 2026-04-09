@@ -132,6 +132,10 @@ struct ChatView: View {
                 }
             }
 
+            if conversation?.remoteSessionActive == true {
+                remoteSessionBar
+            }
+
             if worktree.ciStatus?.overall == .failure {
                 fixCIBar
             }
@@ -252,6 +256,28 @@ struct ChatView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    private var remoteSessionBar: some View {
+        HStack {
+            Image(systemName: "iphone.and.arrow.forward")
+                .foregroundStyle(theme.accent)
+            Text("Session continued remotely")
+                .font(.callout)
+                .foregroundStyle(theme.text)
+            Spacer()
+            Button("Sync") {
+                if let conv = conversation {
+                    Task { await state.syncRemoteSession(for: worktree, conversation: conv) }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(theme.accent)
+            .controlSize(.small)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(theme.accent.opacity(0.1))
     }
 
     private var fixCIBar: some View {

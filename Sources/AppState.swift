@@ -424,6 +424,15 @@ final class AppState {
     }
 
     func sendMessage(_ text: String, images: [Data] = [], to worktree: Worktree, conversation: Conversation) {
+        // If a remote session was active, sync the transcript first
+        if conversation.remoteSessionActive {
+            Task {
+                await syncRemoteSession(for: worktree, conversation: conversation)
+                sendMessage(text, images: images, to: worktree, conversation: conversation)
+            }
+            return
+        }
+
         guard let agent = conversation.agent, agent.isRunning else {
             // Auto-start agent if not running
             do {
@@ -526,13 +535,88 @@ final class AppState {
             do {
                 try await ShellService.run(command)
                 if let conversation {
+                    conversation.remoteSessionActive = true
+                    conversation.handoffMessageCount = conversation.messages.count
                     let msg = AgentMessage(role: .system, content: .text("Remote session started — available in Claude Code mobile app"))
                     conversation.messages.append(msg)
+                    ConfigService.saveMessages(conversation.messages, conversationID: conversation.id)
+                    saveConfig()
                 }
             } catch {
                 showError("Failed to start remote session: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Fetches the session transcript from the remote workspace and backfills
+    /// any messages that happened outside Flight (e.g. via the mobile app).
+    func syncRemoteSession(for worktree: Worktree, conversation: Conversation) async {
+        guard let sessionID = conversation.sessionID,
+              worktree.isRemote,
+              let workspaceName = worktree.workspaceName,
+              let remote = projectForWorktree(worktree)?.remoteMode else { return }
+
+        let connectCmd = remote.connect.replacingOccurrences(of: "{workspace}", with: workspaceName)
+
+        // `claude export` dumps the session transcript as JSONL.
+        // Adjust this command if the CLI surface changes.
+        let fetchCmd = "\(connectCmd) \"claude export --session \(sessionID) --format jsonl\""
+
+        do {
+            let output = try await ShellService.run(fetchCmd)
+            let lines = output.components(separatedBy: "\n").filter { !$0.isEmpty }
+
+            // Parse each line as a {role, content} object
+            var remoteMsgs: [(role: MessageRole, text: String)] = []
+            for line in lines {
+                guard let data = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let role = obj["role"] as? String else { continue }
+
+                // content may be a plain string or an array of content blocks
+                let text: String
+                if let s = obj["content"] as? String {
+                    text = s
+                } else if let blocks = obj["content"] as? [[String: Any]] {
+                    text = blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                } else {
+                    continue
+                }
+                guard !text.isEmpty else { continue }
+
+                let msgRole: MessageRole = role == "user" ? .user : .assistant
+                remoteMsgs.append((role: msgRole, text: text))
+            }
+
+            // Only backfill messages that occurred after the handoff
+            let handoff = conversation.handoffMessageCount ?? 0
+            if remoteMsgs.count > handoff {
+                let newMsgs = Array(remoteMsgs[handoff...])
+
+                let separator = AgentMessage(
+                    role: .system,
+                    content: .text("Synced \(newMsgs.count) message\(newMsgs.count == 1 ? "" : "s") from remote session")
+                )
+                conversation.messages.append(separator)
+
+                for msg in newMsgs {
+                    conversation.messages.append(
+                        AgentMessage(role: msg.role, content: .text(msg.text))
+                    )
+                }
+            }
+        } catch {
+            let msg = AgentMessage(
+                role: .system,
+                content: .text("Could not sync remote session — continuing from last known state")
+            )
+            conversation.messages.append(msg)
+        }
+
+        conversation.remoteSessionActive = false
+        conversation.handoffMessageCount = nil
+        ConfigService.saveMessages(conversation.messages, conversationID: conversation.id)
+        saveConfig()
     }
 
     // MARK: - Keyboard Shortcut Actions
