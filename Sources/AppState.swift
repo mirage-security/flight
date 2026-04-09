@@ -506,6 +506,15 @@ final class AppState {
             )
             worktree.ciStatus = CIStatus(checks: checks)
             ciLog.info("[checkCI] checks: \(checks.count) results")
+
+            // If checks are failing, pre-fetch logs to files
+            if worktree.ciStatus?.overall == .failure {
+                worktree.ciLogsFetching = true
+                Task {
+                    defer { Task { @MainActor in worktree.ciLogsFetching = false } }
+                    await fetchCILogs(for: worktree, prNumber: prNumber, repoPath: project.path, forge: forge)
+                }
+            }
         } catch {
             ciLog.info("[checkCI] getChecks failed: \(error)")
         }
@@ -519,6 +528,68 @@ final class AppState {
             ciLog.info("[checkCI] prStatus: decision=\(status.reviewDecision ?? "nil"), reviews=\(status.reviews.count)")
         } catch {
             ciLog.info("[checkCI] getPRStatus failed: \(error)")
+        }
+    }
+
+    private func fetchCILogs(for worktree: Worktree, prNumber: Int, repoPath: String, forge: ForgeProvider) async {
+        let failedChecks = worktree.ciStatus?.checks.filter { $0.state == "FAILURE" } ?? []
+        ciLog.info("[fetchCILogs] \(failedChecks.count) failed checks, links: \(failedChecks.map { "\($0.name): \($0.link ?? "nil")" })")
+        guard !failedChecks.isEmpty else { return }
+
+        let safeBranch = worktree.branch.replacingOccurrences(of: "/", with: "-")
+        let dir = ConfigService.worktreesBaseURL
+            .appendingPathComponent("ci-logs")
+            .appendingPathComponent(safeBranch)
+
+        // Clean previous logs
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let paths = await withTaskGroup(of: (String, String)?.self) { group in
+            for check in failedChecks {
+                guard let link = check.link,
+                      let url = URL(string: link),
+                      let jobIndex = url.pathComponents.firstIndex(of: "job"),
+                      jobIndex + 1 < url.pathComponents.count else { continue }
+
+                let jobId = url.pathComponents[jobIndex + 1]
+                let owner = url.pathComponents[1]
+                let repo = url.pathComponents[2]
+                let checkName = check.name
+
+                group.addTask {
+                    ciLog.info("[fetchCILogs] fetching job \(jobId) for \(checkName)")
+                    do {
+                        let logs = try await ShellService.run(
+                            "timeout 15 gh api repos/\(owner)/\(repo)/actions/jobs/\(jobId)/logs",
+                            in: repoPath
+                        )
+                        let safeName = checkName.replacingOccurrences(of: " ", with: "-")
+                            .replacingOccurrences(of: "/", with: "-")
+                        let logFile = dir.appendingPathComponent("\(safeName).log")
+                        try logs.write(to: logFile, atomically: true, encoding: .utf8)
+                        ciLog.info("[fetchCILogs] wrote \(checkName) to \(logFile.path)")
+                        return (checkName, logFile.path)
+                    } catch {
+                        ciLog.info("[fetchCILogs] failed for \(checkName): \(error)")
+                        return nil
+                    }
+                }
+            }
+
+            var result: [String: String] = [:]
+            for await pair in group {
+                if let (name, path) = pair {
+                    result[name] = path
+                }
+            }
+            return result
+        }
+
+        if !paths.isEmpty {
+            await MainActor.run {
+                worktree.ciLogsPaths = paths
+            }
         }
     }
 

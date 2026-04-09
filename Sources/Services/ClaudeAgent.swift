@@ -134,7 +134,8 @@ final class ClaudeAgent {
             // Sandbox: filesystem scoped to cwd (worktree), network domains approved
             // via control_request handler. allowUnsandboxedCommands=false makes the
             // CLI ignore dangerouslyDisableSandbox entirely — no escape hatch.
-            claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"autoAllow\":true,\"allowUnsandboxedCommands\":false}}"]
+            let ciLogsDir = ConfigService.worktreesBaseURL.appendingPathComponent("ci-logs").path
+            claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"autoAllow\":true,\"allowUnsandboxedCommands\":false,\"excludedCommands\":[\"git *\",\"gh *\"],\"filesystem\":{\"allowRead\":[\"\(ciLogsDir)\"]}}}"]
         }
 
         if let sessionID {

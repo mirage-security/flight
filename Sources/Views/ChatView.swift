@@ -380,14 +380,20 @@ struct ChatView: View {
                     Divider()
                         .frame(height: 14)
                         .padding(.horizontal, 2)
-                    Button { resolveCI() } label: {
-                        Text("Resolve")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(color)
+                    if worktree.ciLogsFetching {
+                        ProgressView()
+                            .controlSize(.mini)
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                    } else {
+                        Button { resolveCI() } label: {
+                            Text("Resolve")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(color)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .background(color.opacity(0.1))
@@ -550,10 +556,13 @@ struct ChatView: View {
         var message = "Please address these failing CI checks:\n\n"
         for check in failedChecks {
             message += "- **\(check.name)**"
-            if let link = check.link { message += ": \(link)" }
+            if let path = worktree.ciLogsPaths[check.name] {
+                message += " — logs: `\(path)`"
+            } else if let link = check.link {
+                message += ": \(link)"
+            }
             message += "\n"
         }
-        message += ""
         if let conv = conversation {
             state.sendMessage(message, to: worktree, conversation: conv)
         }

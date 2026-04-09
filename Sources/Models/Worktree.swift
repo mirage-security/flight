@@ -20,6 +20,8 @@ final class Worktree: Identifiable {
     var prNumber: Int?
     var ciStatus: CIStatus?
     var prStatus: PRStatus?
+    var ciLogsPaths: [String: String] = [:]  // check name -> log file path
+    var ciLogsFetching = false
 
     // Remote mode
     var isRemote: Bool

@@ -20,7 +20,7 @@ enum ConfigService {
             .appendingPathComponent("config.json")
     }
 
-    private static var worktreesBaseURL: URL {
+    static var worktreesBaseURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("flight")
             .appendingPathComponent("worktrees")
