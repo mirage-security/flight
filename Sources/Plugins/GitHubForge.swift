@@ -53,4 +53,12 @@ struct GitHubForge: ForgeProvider {
 
         return "Could not determine run ID from CI check URL."
     }
+
+    func getPRNumber(branch: String, repoPath: String) async -> Int? {
+        guard let output = try? await ShellService.run(
+            "gh pr view '\(branch)' --json number --jq .number",
+            in: repoPath
+        ) else { return nil }
+        return Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 }

@@ -122,6 +122,16 @@ struct ForgejoForge: ForgeProvider {
         return logOutput.isEmpty ? "No failed job logs found." : logOutput
     }
 
+    func getPRNumber(branch: String, repoPath: String) async -> Int? {
+        guard let (owner, repo) = try? await parseRemote(in: repoPath) else { return nil }
+        guard let pulls: [[String: Any]] = try? await apiRequest(
+            method: "GET",
+            path: "/api/v1/repos/\(owner)/\(repo)/pulls?state=open&head=\(owner):\(branch)&limit=1"
+        ), let first = pulls.first,
+           let number = first["number"] as? Int else { return nil }
+        return number
+    }
+
     // MARK: - Helpers
 
     private func parseRemote(in path: String) async throws -> (owner: String, repo: String) {

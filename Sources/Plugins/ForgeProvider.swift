@@ -16,6 +16,9 @@ protocol ForgeProvider {
 
     /// Gets failed CI logs for a PR's latest run.
     func getFailedLogs(prNumber: Int, repoPath: String) async throws -> String
+
+    /// Looks up the PR number for a branch. Returns nil if no PR exists.
+    func getPRNumber(branch: String, repoPath: String) async -> Int?
 }
 
 // MARK: - Forge Type

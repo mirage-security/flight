@@ -671,10 +671,24 @@ final class AppState {
         ciPollingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                for worktree in self.allWorktrees where worktree.prNumber != nil {
-                    await self.checkCI(for: worktree)
+                for worktree in self.allWorktrees {
+                    if worktree.prNumber != nil {
+                        await self.checkCI(for: worktree)
+                    } else {
+                        await self.discoverPR(for: worktree)
+                    }
                 }
             }
+        }
+    }
+
+    private func discoverPR(for worktree: Worktree) async {
+        guard let project = projectForWorktree(worktree),
+              let forge = project.forgeProvider else { return }
+        if let number = await forge.getPRNumber(branch: worktree.branch, repoPath: project.path) {
+            worktree.prNumber = number
+            saveConfig()
+            await checkCI(for: worktree)
         }
     }
 
