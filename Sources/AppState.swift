@@ -424,15 +424,6 @@ final class AppState {
     }
 
     func sendMessage(_ text: String, images: [Data] = [], to worktree: Worktree, conversation: Conversation) {
-        // If a remote session was active, sync the transcript first
-        if conversation.remoteSessionActive {
-            Task {
-                await syncRemoteSession(for: worktree, conversation: conversation)
-                sendMessage(text, images: images, to: worktree, conversation: conversation)
-            }
-            return
-        }
-
         guard let agent = conversation.agent, agent.isRunning else {
             // Auto-start agent if not running
             do {

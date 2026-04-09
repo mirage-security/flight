@@ -132,6 +132,8 @@ struct InputBarView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(theme.border, lineWidth: 1)
                 )
+                .disabled(isRemoteSessionActive)
+                .opacity(isRemoteSessionActive ? 0.4 : 1)
 
                 Button {
                     sendMessage()
@@ -149,8 +151,13 @@ struct InputBarView: View {
         .background(theme.headerBackground)
     }
 
+    private var isRemoteSessionActive: Bool {
+        conversation?.remoteSessionActive ?? false
+    }
+
     private var canSend: Bool {
-        !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty
+        !isRemoteSessionActive &&
+        (!messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedImages.isEmpty)
     }
 
     private func sendMessage() {
