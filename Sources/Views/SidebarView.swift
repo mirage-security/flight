@@ -77,7 +77,9 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func worktreeContextMenu(worktree: Worktree) -> some View {
-        if worktree.prNumber == nil {
+        if worktree.prNumber == nil,
+           let project = state.projects.first(where: { $0.worktrees.contains { $0.id == worktree.id } }),
+           project.forgeConfig != nil {
             Button("Create PR") {
                 Task { await state.createPR(for: worktree) }
             }
