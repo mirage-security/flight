@@ -26,7 +26,7 @@ final class Project: Identifiable {
     }
 
     var hasRemoteMode: Bool {
-        remoteMode != nil
+        remoteMode != nil || RemoteScriptsService.hasAnyScript(project: self)
     }
 
     /// Returns the forge provider for this project, or nil if none configured.
