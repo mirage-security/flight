@@ -8,13 +8,21 @@ final class Project: Identifiable {
     var worktrees: [Worktree]
     var remoteMode: RemoteModeConfig?
     var forgeConfig: ForgeConfig?
+    var setupScript: String?
 
-    init(path: String, worktrees: [Worktree] = [], remoteMode: RemoteModeConfig? = nil, forgeConfig: ForgeConfig? = nil) {
+    init(
+        path: String,
+        worktrees: [Worktree] = [],
+        remoteMode: RemoteModeConfig? = nil,
+        forgeConfig: ForgeConfig? = nil,
+        setupScript: String? = nil
+    ) {
         self.path = path
         self.name = URL(fileURLWithPath: path).lastPathComponent
         self.worktrees = worktrees
         self.remoteMode = remoteMode
         self.forgeConfig = forgeConfig
+        self.setupScript = setupScript
     }
 
     var hasRemoteMode: Bool {
@@ -34,6 +42,7 @@ struct ProjectConfig: Codable {
     var worktreeConfigs: [WorktreeConfig]
     var remoteMode: RemoteModeConfig?
     var forgeConfig: ForgeConfig?
+    var setupScript: String?
 
     init(from project: Project) {
         self.name = project.name
@@ -41,10 +50,16 @@ struct ProjectConfig: Codable {
         self.worktreeConfigs = project.worktrees.map { WorktreeConfig(from: $0) }
         self.remoteMode = project.remoteMode
         self.forgeConfig = project.forgeConfig
+        self.setupScript = project.setupScript
     }
 
     func toProject() -> Project {
-        let project = Project(path: path, remoteMode: remoteMode, forgeConfig: forgeConfig)
+        let project = Project(
+            path: path,
+            remoteMode: remoteMode,
+            forgeConfig: forgeConfig,
+            setupScript: setupScript
+        )
         project.worktrees = worktreeConfigs.map { $0.toWorktree() }
         return project
     }

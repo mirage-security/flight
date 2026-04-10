@@ -5,6 +5,7 @@ enum ChatSection: Identifiable {
     case message(AgentMessage)
     case toolGroup(id: UUID, tools: [AgentMessage])
     case provisionGroup(id: UUID, logs: [AgentMessage])
+    case setupGroup(id: UUID, logs: [AgentMessage])
     case plan(AgentMessage)
     case system(AgentMessage)
 
@@ -13,6 +14,7 @@ enum ChatSection: Identifiable {
         case .message(let m): return m.id
         case .toolGroup(let id, _): return id
         case .provisionGroup(let id, _): return id
+        case .setupGroup(let id, _): return id
         case .plan(let m): return m.id
         case .system(let m): return m.id
         }
@@ -22,6 +24,7 @@ enum ChatSection: Identifiable {
         var sections: [ChatSection] = []
         var currentTools: [AgentMessage] = []
         var currentProvisionLogs: [AgentMessage] = []
+        var currentSetupLogs: [AgentMessage] = []
 
         func flushTools() {
             if !currentTools.isEmpty {
@@ -45,25 +48,41 @@ enum ChatSection: Identifiable {
             }
         }
 
+        func flushSetupLogs() {
+            if !currentSetupLogs.isEmpty {
+                sections.append(.setupGroup(id: currentSetupLogs[0].id, logs: currentSetupLogs))
+                currentSetupLogs = []
+            }
+        }
+
         for message in messages {
             if message.isProvisionLog {
                 flushTools()
+                flushSetupLogs()
                 currentProvisionLogs.append(message)
+            } else if message.isSetupLog {
+                flushTools()
+                flushProvisionLogs()
+                currentSetupLogs.append(message)
             } else if message.role == .system {
                 flushTools()
                 flushProvisionLogs()
+                flushSetupLogs()
                 sections.append(.system(message))
             } else if message.isToolUse || message.isToolResult {
                 flushProvisionLogs()
+                flushSetupLogs()
                 currentTools.append(message)
             } else {
                 flushTools()
                 flushProvisionLogs()
+                flushSetupLogs()
                 sections.append(.message(message))
             }
         }
         flushTools()
         flushProvisionLogs()
+        flushSetupLogs()
         return sections
     }
 }
@@ -274,10 +293,38 @@ struct ChatMessageListView: View {
         return ChatSection.build(from: conversation.messages)
     }
 
+    /// True while the worktree is being created and a setup script is
+    /// configured but no real setup output has streamed in yet. We render a
+    /// placeholder ProvisionGroupView in this state so the user gets immediate
+    /// feedback during git create + npm install's silent dep-resolution phase.
+    private var showingSetupPlaceholder: Bool {
+        guard worktree.status == .creating else { return false }
+        let hasSetupSection = sections.contains { section in
+            if case .setupGroup = section { return true }
+            return false
+        }
+        if hasSetupSection { return false }
+        guard let project = state.projectFor(worktree: worktree) else { return false }
+        return WorktreeSetupService.willRunSetup(project: project)
+    }
+
+    private static let placeholderSetupLogs: [AgentMessage] = [
+        AgentMessage(role: .system, content: .setupLog("Creating worktree..."))
+    ]
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    if showingSetupPlaceholder {
+                        ProvisionGroupView(
+                            logs: Self.placeholderSetupLogs,
+                            isActive: true,
+                            kind: .worktreeSetup
+                        )
+                        .id("setup-placeholder")
+                    }
+
                     ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
                         switch section {
                         case .message(let message):
@@ -289,7 +336,19 @@ struct ChatMessageListView: View {
                                 .id(section.id)
                         case .provisionGroup(_, let logs):
                             let isLast = index == sections.count - 1
-                            ProvisionGroupView(logs: logs, isActive: isLast && worktree.status == .creating)
+                            ProvisionGroupView(
+                                logs: logs,
+                                isActive: isLast && worktree.status == .creating,
+                                kind: .remoteProvision
+                            )
+                                .id(section.id)
+                        case .setupGroup(_, let logs):
+                            let isLast = index == sections.count - 1
+                            ProvisionGroupView(
+                                logs: logs,
+                                isActive: isLast && worktree.status == .creating,
+                                kind: .worktreeSetup
+                            )
                                 .id(section.id)
                         case .plan(let message):
                             PlanView(message: message, state: state, worktree: worktree)
@@ -720,9 +779,36 @@ struct ToolGroupView: View {
 
 // MARK: - Provision Group (collapsed log output)
 
+enum ProvisionGroupKind {
+    case remoteProvision
+    case worktreeSetup
+
+    var icon: String {
+        switch self {
+        case .remoteProvision: return "cloud.fill"
+        case .worktreeSetup: return "shippingbox.fill"
+        }
+    }
+
+    var activeLabel: String {
+        switch self {
+        case .remoteProvision: return "Provisioning..."
+        case .worktreeSetup: return "Setting up worktree..."
+        }
+    }
+
+    var doneLabel: String {
+        switch self {
+        case .remoteProvision: return "Provisioned"
+        case .worktreeSetup: return "Worktree ready"
+        }
+    }
+}
+
 struct ProvisionGroupView: View {
     let logs: [AgentMessage]
     var isActive: Bool = false
+    var kind: ProvisionGroupKind = .remoteProvision
     @Environment(\.theme) private var theme
     @State private var isExpanded = false
 
@@ -748,11 +834,11 @@ struct ProvisionGroupView: View {
                             .controlSize(.small)
                     }
 
-                    Image(systemName: "cloud.fill")
+                    Image(systemName: kind.icon)
                         .font(.system(size: 11))
                         .foregroundStyle(isActive ? theme.yellow : theme.green)
 
-                    Text(isActive ? "Provisioning..." : "Provisioned")
+                    Text(isActive ? kind.activeLabel : kind.doneLabel)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(theme.text)
 

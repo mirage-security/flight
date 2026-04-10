@@ -96,17 +96,23 @@ final class AppState {
 
     func reloadConfig() {
         let config = ConfigService.load()
-        // Reload remote mode and forge configs per project
+        // Reload remote mode, forge config, and setup script per project
         for projectConfig in config.projects {
             if let project = projects.first(where: { $0.name == projectConfig.name }) {
                 project.remoteMode = projectConfig.remoteMode
                 project.forgeConfig = projectConfig.forgeConfig
+                project.setupScript = projectConfig.setupScript
             }
         }
     }
 
     func updateRemoteMode(_ config: RemoteModeConfig?, for project: Project) {
         project.remoteMode = config
+        saveConfig()
+    }
+
+    func updateSetupScript(_ script: String?, for project: Project) {
+        project.setupScript = script
         saveConfig()
     }
 
@@ -131,7 +137,10 @@ final class AppState {
         guard let project = selectedProject ?? projects.first else { return }
         let wtPath = ConfigService.worktreePath(repoName: project.name, branch: branch)
 
-        // Optimistic: show worktree immediately with "creating" status
+        // Optimistic: show worktree immediately with "creating" status.
+        // ChatMessageListView shows a setup placeholder while status == .creating
+        // and a setup script is configured, so the user gets feedback during the
+        // git create + npm-install-resolving silence.
         let worktree = Worktree(branch: branch, path: wtPath, status: .creating)
         let conversation = worktree.ensureConversation()
         project.worktrees.append(worktree)
@@ -145,6 +154,29 @@ final class AppState {
             )
 
             saveConfig()
+
+            // Run worktree setup script (settings field or .flight/worktree-setup)
+            // before the agent ever spawns, so dependencies are deterministic and
+            // the agent's sandbox can keep rejecting dynamic installs.
+            if let resolved = WorktreeSetupService.resolveScript(project: project, worktreePath: wtPath) {
+                conversation.messages.append(
+                    AgentMessage(role: .system, content: .setupLog("Running setup script..."))
+                )
+                do {
+                    try await WorktreeSetupService.run(
+                        scriptContent: resolved.content,
+                        in: wtPath
+                    ) { [weak conversation] line in
+                        let msg = AgentMessage(role: .system, content: .setupLog(line))
+                        conversation?.messages.append(msg)
+                    }
+                } catch {
+                    // Leave the worktree on disk so the user can inspect/retry.
+                    showError("Worktree setup failed: \(error.localizedDescription)")
+                    worktree.status = .error
+                    return
+                }
+            }
 
             // Auto-start agent
             try startAgent(for: worktree, conversation: conversation)
@@ -757,8 +789,12 @@ final class AppState {
         }
     }
 
-    private func projectForWorktree(_ worktree: Worktree) -> Project? {
+    func projectFor(worktree: Worktree) -> Project? {
         projects.first { $0.worktrees.contains { $0.id == worktree.id } }
+    }
+
+    private func projectForWorktree(_ worktree: Worktree) -> Project? {
+        projectFor(worktree: worktree)
     }
 
     private func saveConfig() {

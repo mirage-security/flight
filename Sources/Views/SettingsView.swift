@@ -14,15 +14,21 @@ struct SettingsView: View {
     @State private var teardown: String = ""
     @State private var list: String = ""
 
+    @State private var worktreeProjectID: String?
+    @State private var setupScript: String = ""
+
     var body: some View {
         TabView {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
 
+            worktreeTab
+                .tabItem { Label("Worktree", systemImage: "shippingbox") }
+
             remoteTab
                 .tabItem { Label("Remote", systemImage: "cloud") }
         }
-        .frame(width: 500, height: 420)
+        .frame(width: 500, height: 480)
         .onAppear {
             themeNames = ThemeManager.shared.availableThemeNames()
         }
@@ -84,6 +90,69 @@ struct SettingsView: View {
     private var selectedRemoteProject: Project? {
         guard let id = selectedProjectID else { return state.projects.first }
         return state.projects.first { $0.id == id }
+    }
+
+    private var selectedWorktreeProject: Project? {
+        guard let id = worktreeProjectID else { return state.projects.first }
+        return state.projects.first { $0.id == id }
+    }
+
+    private func loadWorktreeFields() {
+        setupScript = selectedWorktreeProject?.setupScript ?? ""
+    }
+
+    private var worktreeTab: some View {
+        Form {
+            Picker("Project", selection: $worktreeProjectID) {
+                ForEach(state.projects) { project in
+                    Text(project.name).tag(Optional(project.id))
+                }
+            }
+            .onChange(of: worktreeProjectID) { _, _ in
+                loadWorktreeFields()
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Setup script")
+                        .font(.system(size: 12, weight: .medium))
+                    TextEditor(text: $setupScript)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+                }
+            } footer: {
+                Text("Runs once after each new worktree is created, with cwd set to the worktree. Use it to install dependencies so the agent doesn't have to. When this field is set, it overrides any committed .flight/worktree-setup file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                if selectedWorktreeProject?.setupScript?.isEmpty == false {
+                    Button("Clear") {
+                        if let project = selectedWorktreeProject {
+                            state.updateSetupScript(nil, for: project)
+                        }
+                        setupScript = ""
+                    }
+                }
+                Button("Save") {
+                    guard let project = selectedWorktreeProject else { return }
+                    let trimmed = setupScript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    state.updateSetupScript(trimmed.isEmpty ? nil : setupScript, for: project)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear {
+            worktreeProjectID = state.projects.first?.id
+            state.reloadConfig()
+            loadWorktreeFields()
+        }
     }
 
     private func loadRemoteFields() {

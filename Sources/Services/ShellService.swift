@@ -129,4 +129,84 @@ enum ShellService {
             process.terminate()
         }
     }
+
+    /// Run a script by piping its content to `/bin/zsh -s` on stdin. Streams
+    /// merged stdout+stderr lines via the callback. Useful when the script
+    /// content lives in memory (e.g. a settings field) rather than on disk.
+    @discardableResult
+    static func runScriptStreaming(
+        scriptContent: String,
+        in directory: String,
+        onLine: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-s"]
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stdoutPipe
+
+        try process.run()
+
+        // `exec 2>&1` ensures any later redirects in the script still merge
+        // stderr into the same stream we're reading.
+        let wrapped = "exec 2>&1\n" + scriptContent
+        if let data = wrapped.data(using: .utf8) {
+            try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
+        }
+        try? stdinPipe.fileHandleForWriting.close()
+
+        let fileHandle = stdoutPipe.fileHandleForReading
+        final class OutputAccumulator: @unchecked Sendable {
+            var value = ""
+        }
+        let output = OutputAccumulator()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                Task.detached {
+                    var lineBuffer = Data()
+
+                    while true {
+                        let data = fileHandle.availableData
+                        if data.isEmpty { break }
+
+                        lineBuffer.append(data)
+
+                        while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                            let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
+                            lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+                            if let line = String(data: Data(lineData), encoding: .utf8), !line.isEmpty {
+                                output.value += line + "\n"
+                                await MainActor.run { onLine(line) }
+                            }
+                        }
+                    }
+
+                    if !lineBuffer.isEmpty, let line = String(data: lineBuffer, encoding: .utf8), !line.isEmpty {
+                        output.value += line
+                        await MainActor.run { onLine(line) }
+                    }
+
+                    process.waitUntilExit()
+
+                    if process.terminationStatus != 0 {
+                        continuation.resume(throwing: ShellError.failed(
+                            command: "worktree-setup",
+                            exitCode: process.terminationStatus,
+                            stderr: output.value
+                        ))
+                    } else {
+                        continuation.resume(returning: output.value.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                }
+            }
+        } onCancel: {
+            process.terminate()
+        }
+    }
 }
