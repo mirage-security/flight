@@ -225,6 +225,27 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open \(urlString)")
+                .contextMenu {
+                    Button("Open in Browser") {
+                        NSWorkspace.shared.open(url)
+                    }
+                    Button("Copy URL") {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(urlString, forType: .string)
+                    }
+                }
+            }
+            if canOpenInVSCode {
+                Button {
+                    state.openInVSCode(for: worktree)
+                } label: {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .help("Open in VS Code")
             }
             Spacer()
             Text(headerStatusLabel)
@@ -279,6 +300,16 @@ struct ChatView: View {
 
     private var statusColor: Color {
         headerStatusColor
+    }
+
+    /// Local worktrees can always be opened in VS Code (we just shell out
+    /// to `code <path>`); remote worktrees need both an `ssh_target` and a
+    /// `repo_path` from the provision script's FLIGHT_OUTPUT.
+    private var canOpenInVSCode: Bool {
+        if worktree.isRemote {
+            return worktree.remoteSSHTarget != nil && worktree.remoteRepoPath != nil
+        }
+        return !worktree.path.isEmpty
     }
 
 }

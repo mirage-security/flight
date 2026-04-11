@@ -315,8 +315,13 @@ final class AppState {
                     // not progress — apply them to the worktree and suppress
                     // them from the displayed log.
                     if let (key, value) = RemoteScriptsService.parseFlightOutput(line) {
-                        if let worktree, key == "url" {
-                            worktree.remoteURL = value
+                        if let worktree {
+                            switch key {
+                            case "url":        worktree.remoteURL = value
+                            case "repo_path":  worktree.remoteRepoPath = value
+                            case "ssh_target": worktree.remoteSSHTarget = value
+                            default:           break
+                            }
                         }
                         return
                     }
@@ -401,11 +406,20 @@ final class AppState {
                let resolved = RemoteScriptsService.resolve(
                 .teardown, project: project, workspace: workspaceName
                ) {
-                _ = try? await ShellService.run(
-                    resolved.command,
-                    in: resolved.workingDirectory,
-                    environment: resolved.environment
-                )
+                do {
+                    try await ShellService.run(
+                        resolved.command,
+                        in: resolved.workingDirectory,
+                        environment: resolved.environment
+                    )
+                } catch {
+                    // Surface the error so the user knows the remote
+                    // workspace may be orphaned. Flight still removes the
+                    // worktree from the UI so they aren't stuck — they
+                    // can clean up via whatever the project's teardown
+                    // tool is.
+                    showError("Teardown failed for \(workspaceName): \(error.localizedDescription). The remote workspace may still exist on the host — verify and clean up manually if needed.")
+                }
             }
         } else {
             do {
@@ -725,6 +739,35 @@ final class AppState {
     /// Starts a detached interactive `claude` session on the remote workspace
     /// via SSH. Because it runs as a full (non `-p`) process it registers with
     /// the Anthropic backend and appears in the Claude Code mobile app.
+    /// Opens the worktree in a fresh VS Code window. Local worktrees use
+    /// the on-disk path; remote worktrees go through Remote-SSH using the
+    /// `ssh_target` and `repo_path` emitted by provision via FLIGHT_OUTPUT.
+    func openInVSCode(for worktree: Worktree) {
+        let command: String
+        if worktree.isRemote {
+            guard let sshTarget = worktree.remoteSSHTarget,
+                  let repoPath = worktree.remoteRepoPath else {
+                showError("Can't open in VS Code: remote worktree is missing ssh_target or repo_path. Have your provision script emit `FLIGHT_OUTPUT: ssh_target=...` and `FLIGHT_OUTPUT: repo_path=...`.")
+                return
+            }
+            let host = "ssh-remote+\(sshTarget)"
+            command = "code --new-window --remote \(shellQuote(host)) \(shellQuote(repoPath))"
+        } else {
+            command = "code --new-window \(shellQuote(worktree.path))"
+        }
+        Task {
+            do {
+                try await ShellService.run(command)
+            } catch {
+                showError("Failed to open VS Code: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     func openRemoteSession(for worktree: Worktree) {
         guard worktree.isRemote,
               let workspaceName = worktree.workspaceName,
