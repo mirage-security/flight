@@ -8,6 +8,11 @@ struct PasteableTextView: NSViewRepresentable {
     var onReturn: () -> Void
     var onEscape: () -> Void
     var onImagePaste: (NSImage, Data) -> Void
+    /// When true, plain Return fires `onReturn` (and Shift+Return inserts a
+    /// newline). When false, plain Return inserts a newline and only
+    /// Cmd+Return fires `onReturn`. Cmd+Return fires `onReturn` in both
+    /// modes.
+    var sendOnReturn: Bool = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -19,6 +24,7 @@ struct PasteableTextView: NSViewRepresentable {
         textView.onImagePaste = onImagePaste
         textView.onReturn = onReturn
         textView.onEscape = onEscape
+        textView.sendOnReturn = sendOnReturn
         textView.font = font
         textView.textColor = textColor
         textView.backgroundColor = .clear
@@ -66,6 +72,7 @@ struct PasteableTextView: NSViewRepresentable {
         textView.onImagePaste = onImagePaste
         textView.onReturn = onReturn
         textView.onEscape = onEscape
+        textView.sendOnReturn = sendOnReturn
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
@@ -87,6 +94,7 @@ final class ImagePasteTextView: NSTextView {
     var onImagePaste: ((NSImage, Data) -> Void)?
     var onReturn: (() -> Void)?
     var onEscape: (() -> Void)?
+    var sendOnReturn: Bool = true
 
     override func paste(_ sender: Any?) {
         let pasteboard = NSPasteboard.general
@@ -109,12 +117,19 @@ final class ImagePasteTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Return without shift = send
-        if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
+        let isReturn = event.keyCode == 36
+        let hasShift = event.modifierFlags.contains(.shift)
+        let hasCommand = event.modifierFlags.contains(.command)
+
+        if isReturn && hasCommand {
             onReturn?()
             return
         }
-        // Escape = interrupt
+        if isReturn && sendOnReturn && !hasShift {
+            onReturn?()
+            return
+        }
+        // Escape = interrupt / dismiss
         if event.keyCode == 53 {
             onEscape?()
             return

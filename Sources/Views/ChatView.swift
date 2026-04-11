@@ -299,6 +299,9 @@ struct ChatMessageListView: View {
     /// feedback during git create + npm install's silent dep-resolution phase.
     private var showingSetupPlaceholder: Bool {
         guard worktree.status == .creating else { return false }
+        // Remote worktrees don't run a local setup script — the
+        // provisioning group already covers user-visible progress.
+        if worktree.isRemote { return false }
         let hasSetupSection = sections.contains { section in
             if case .setupGroup = section { return true }
             return false

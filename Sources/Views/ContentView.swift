@@ -65,7 +65,6 @@ struct RemotePromptSheet: View {
     @Bindable var state: AppState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
-    @FocusState private var isFocused: Bool
     @State private var runningWorkspaces: [String] = []
     @State private var selectedWorkspace: String? = nil
     @State private var loadingWorkspaces = true
@@ -114,26 +113,23 @@ struct RemotePromptSheet: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(theme.secondaryText)
 
-                TextEditor(text: $state.remoteInitialPrompt)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.text)
-                    .scrollContentBackground(.hidden)
-                    .frame(width: 450, height: 100)
-                    .padding(8)
-                    .background(theme.inputBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(theme.border, lineWidth: 1)
-                    )
-                    .focused($isFocused)
-                    .onKeyPress(.return, phases: .down) { keyPress in
-                        if keyPress.modifiers.contains(.command) {
-                            launch()
-                            return .handled
-                        }
-                        return .ignored
-                    }
+                PasteableTextView(
+                    text: $state.remoteInitialPrompt,
+                    font: .systemFont(ofSize: 13),
+                    textColor: NSColor(theme.text),
+                    onReturn: { launch() },
+                    onEscape: { dismiss() },
+                    onImagePaste: { _, _ in },
+                    sendOnReturn: false
+                )
+                .frame(width: 450, height: 100)
+                .padding(8)
+                .background(theme.inputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.border, lineWidth: 1)
+                )
             }
 
             HStack {
@@ -164,7 +160,6 @@ struct RemotePromptSheet: View {
         .padding(24)
         .background(theme.background)
         .onAppear {
-            isFocused = true
             Task {
                 runningWorkspaces = await state.listRunningWorkspaces()
                 loadingWorkspaces = false
@@ -175,7 +170,6 @@ struct RemotePromptSheet: View {
     private func workspaceChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button {
             action()
-            isFocused = true
         } label: {
             Text(label)
                 .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
