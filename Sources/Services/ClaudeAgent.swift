@@ -139,6 +139,12 @@ final class ClaudeAgent {
             // CLI ignore dangerouslyDisableSandbox entirely — no escape hatch.
             let ciLogsDir = ConfigService.worktreesBaseURL.appendingPathComponent("ci-logs").path
             claudeArgs += ["--settings", "{\"sandbox\":{\"enabled\":true,\"autoAllow\":true,\"allowUnsandboxedCommands\":false,\"excludedCommands\":[\"git *\",\"gh *\"],\"filesystem\":{\"allowRead\":[\"\(ciLogsDir)\"]}}}"]
+        } else {
+            // Remote workspaces are their own isolation boundary (separate
+            // VM), so the local sandbox doesn't apply. Skip permission
+            // prompts entirely — there's no interactive channel to approve
+            // them over anyway.
+            claudeArgs += ["--dangerously-skip-permissions"]
         }
 
         if let sessionID {
