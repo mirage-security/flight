@@ -17,6 +17,12 @@ final class AppState {
     var errorMessage: String?
     var showingError = false
 
+    // Project picker — generic disambiguation modal used by Cmd+N / Cmd+Shift+N.
+    var showingProjectPicker = false
+    var projectPickerTitle = ""
+    var projectPickerCandidates: [Project] = []
+    var projectPickerOnSelect: ((Project) -> Void)?
+
     private var ciPollingTimer: Timer?
     private var ciPollingInProgress = false
     private var provisioningTasks: [String: Task<Void, Never>] = [:]
@@ -77,6 +83,30 @@ final class AppState {
 
     var hasRemoteMode: Bool {
         (selectedProject ?? projects.first)?.hasRemoteMode ?? false
+    }
+
+    var projectsWithRemoteMode: [Project] {
+        projects.filter(\.hasRemoteMode)
+    }
+
+    /// Presents the generic project picker for disambiguation. When there
+    /// are 0 candidates this is a no-op; when there is exactly 1 it skips
+    /// the picker entirely and runs `onSelect` immediately so single-project
+    /// users feel zero friction.
+    func presentProjectPicker(
+        title: String,
+        candidates: [Project],
+        onSelect: @escaping (Project) -> Void
+    ) {
+        guard !candidates.isEmpty else { return }
+        if candidates.count == 1 {
+            onSelect(candidates[0])
+            return
+        }
+        projectPickerTitle = title
+        projectPickerCandidates = candidates
+        projectPickerOnSelect = onSelect
+        showingProjectPicker = true
     }
 
     // MARK: - Project Management

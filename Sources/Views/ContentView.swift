@@ -58,6 +58,10 @@ struct ContentView: View {
             RemotePromptSheet(state: state)
                 .environment(\.theme, theme)
         }
+        .sheet(isPresented: $state.showingProjectPicker) {
+            ProjectPickerSheet(state: state)
+                .environment(\.theme, theme)
+        }
     }
 }
 

@@ -32,16 +32,28 @@ struct FlightApp: App {
             // Cmd+N — New worktree (replaces default New Window)
             CommandGroup(replacing: .newItem) {
                 Button("New Worktree") {
-                    Task { await state.createWorktreeWithRandomName() }
+                    state.presentProjectPicker(
+                        title: "New Worktree",
+                        candidates: state.projects
+                    ) { project in
+                        state.selectedProjectID = project.id
+                        Task { await state.createWorktreeWithRandomName() }
+                    }
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(state.projects.isEmpty)
 
                 Button("New Remote Worktree...") {
-                    state.showingRemotePrompt = true
+                    state.presentProjectPicker(
+                        title: "New Remote Worktree",
+                        candidates: state.projectsWithRemoteMode
+                    ) { project in
+                        state.selectedProjectID = project.id
+                        state.showingRemotePrompt = true
+                    }
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-                .disabled(state.projects.isEmpty || !state.hasRemoteMode)
+                .disabled(state.projectsWithRemoteMode.isEmpty)
 
                 // Cmd+T — New tab in current worktree
                 Button("New Tab") {
