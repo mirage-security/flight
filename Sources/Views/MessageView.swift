@@ -1,9 +1,13 @@
 import SwiftUI
 
-struct MessageView: View {
+struct MessageView: View, Equatable {
     let message: AgentMessage
     @AppStorage("flightFontSize") private var fontSize: Double = 14
     @Environment(\.theme) private var theme
+
+    static func == (lhs: MessageView, rhs: MessageView) -> Bool {
+        lhs.message == rhs.message
+    }
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -23,7 +27,6 @@ struct MessageView: View {
                         .textSelection(.enabled)
                 } else {
                     MarkdownText(message.textContent, fontSize: fontSize)
-                        .textSelection(.enabled)
                 }
             }
             .padding(.horizontal, 14)

@@ -503,7 +503,7 @@ final class AppState {
                 else if name == "ExitPlanMode" { conversation.planMode = false }
             }
             conversation.messages.append(message)
-            ConfigService.saveMessages(conversation.messages, conversationID: conversation.id)
+            ConfigService.scheduleSaveMessages(conversation.messages, conversationID: conversation.id)
         }
         agent.onSessionID = { [weak self, weak conversation] sessionID in
             conversation?.sessionID = sessionID

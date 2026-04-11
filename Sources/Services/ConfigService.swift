@@ -104,6 +104,28 @@ enum ConfigService {
         try? data.write(to: url, options: .atomic)
     }
 
+    // Trailing-edge debounced save, off the main thread. Safe to call at
+    // streaming rates — only the latest snapshot within the debounce window
+    // is persisted. Callers keep the hot path free of JSON encode + disk I/O.
+    nonisolated(unsafe) private static var pendingSaveWorkItems: [UUID: DispatchWorkItem] = [:]
+    private static let pendingSaveLock = NSLock()
+    private static let saveQueue = DispatchQueue(label: "flight.configservice.saves", qos: .utility)
+
+    static func scheduleSaveMessages(_ messages: [AgentMessage], conversationID: UUID) {
+        let snapshot = messages
+        pendingSaveLock.lock()
+        pendingSaveWorkItems[conversationID]?.cancel()
+        let item = DispatchWorkItem {
+            saveMessages(snapshot, conversationID: conversationID)
+            pendingSaveLock.lock()
+            pendingSaveWorkItems[conversationID] = nil
+            pendingSaveLock.unlock()
+        }
+        pendingSaveWorkItems[conversationID] = item
+        pendingSaveLock.unlock()
+        saveQueue.asyncAfter(deadline: .now() + 0.4, execute: item)
+    }
+
     static func deleteChatHistory(conversationID: UUID) {
         let url = chatFileURL(conversationID: conversationID)
         try? FileManager.default.removeItem(at: url)

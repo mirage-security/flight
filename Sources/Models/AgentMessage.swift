@@ -6,7 +6,7 @@ enum MessageRole: String, Codable {
     case system
 }
 
-enum MessageContent: Codable {
+enum MessageContent: Codable, Equatable {
     case text(String)
     case toolUse(name: String, input: String)
     case toolResult(content: String)
@@ -15,7 +15,7 @@ enum MessageContent: Codable {
     case setupLog(String)
 }
 
-struct AgentMessage: Identifiable, Codable {
+struct AgentMessage: Identifiable, Codable, Equatable {
     let id: UUID
     let role: MessageRole
     let content: MessageContent

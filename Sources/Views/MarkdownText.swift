@@ -15,6 +15,7 @@ struct MarkdownText: View {
         StructuredText(markdown: text)
             .font(.system(size: fontSize))
             .foregroundStyle(theme.text)
+            .textual.textSelection(.enabled)
             .textual.inlineStyle(
                 InlineStyle()
                     .code(.foregroundColor(theme.cyan), .font(.system(size: fontSize - 1, design: .monospaced)))

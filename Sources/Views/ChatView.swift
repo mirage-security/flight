@@ -359,9 +359,8 @@ struct ChatMessageListView: View {
     ]
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
                     if showingSetupPlaceholder {
                         ProvisionGroupView(
                             logs: Self.placeholderSetupLogs,
@@ -375,6 +374,7 @@ struct ChatMessageListView: View {
                         switch section {
                         case .message(let message):
                             MessageView(message: message)
+                                .equatable()
                                 .id(section.id)
                         case .toolGroup(_, let tools):
                             let isLast = index == sections.count - 1
@@ -417,27 +417,8 @@ struct ChatMessageListView: View {
                 }
                 .padding()
             }
-            .onChange(of: conversation?.messages.count) { _, _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onChange(of: isThinking) { _, _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onAppear {
-                scrollToBottom(proxy: proxy)
-            }
+            .defaultScrollAnchor(.bottom)
         }
-    }
-
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            if isThinking {
-                proxy.scrollTo("thinking", anchor: .bottom)
-            } else if let last = sections.last {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
-        }
-    }
 }
 
 // MARK: - PR Status Strip (isolated observation scope)
