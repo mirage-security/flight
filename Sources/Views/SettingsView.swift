@@ -169,6 +169,46 @@ struct SettingsView: View {
         }
     }
 
+    private var remoteAllEmpty: Bool {
+        provision.isEmpty && connect.isEmpty && teardown.isEmpty && list.isEmpty
+    }
+
+    private var remoteRequiredFilled: Bool {
+        !provision.isEmpty && !connect.isEmpty && !teardown.isEmpty
+    }
+
+    private func remoteFieldEditor(
+        title: String,
+        lifecycle: RemoteLifecycle,
+        text: Binding<String>
+    ) -> some View {
+        let fileExists = selectedRemoteProject.map {
+            RemoteScriptsService.hasFile(lifecycle, project: $0)
+        } ?? false
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                if fileExists {
+                    Text(text.wrappedValue.isEmpty
+                        ? "using .flight/\(lifecycle.rawValue)"
+                        : "overrides .flight/\(lifecycle.rawValue)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+                Spacer()
+            }
+            TextEditor(text: text)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+        }
+    }
+
     private var remoteTab: some View {
         Form {
             Picker("Project", selection: $selectedProjectID) {
@@ -181,73 +221,33 @@ struct SettingsView: View {
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Provision")
-                        .font(.system(size: 12, weight: .medium))
-                    TextEditor(text: $provision)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Connect")
-                        .font(.system(size: 12, weight: .medium))
-                    TextEditor(text: $connect)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Teardown")
-                        .font(.system(size: 12, weight: .medium))
-                    TextEditor(text: $teardown)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("List (optional)")
-                        .font(.system(size: 12, weight: .medium))
-                    TextEditor(text: $list)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                }
+                remoteFieldEditor(title: "Provision", lifecycle: .provision, text: $provision)
+                remoteFieldEditor(title: "Connect", lifecycle: .connect, text: $connect)
+                remoteFieldEditor(title: "Teardown", lifecycle: .teardown, text: $teardown)
+                remoteFieldEditor(title: "List (optional)", lifecycle: .list, text: $list)
             } footer: {
-                Text("Use {branch} and {workspace} as placeholders. Provision prints workspace name to stdout. List prints one name per line.")
+                Text("Each command runs via zsh with these env vars: provision sees $FLIGHT_BRANCH and prints the workspace name on its last stdout line. connect is a wrapper that runs \"$@\" on the workspace (Flight appends the remote command). connect/teardown see $FLIGHT_WORKSPACE. list prints one workspace name per line. Empty fields fall back to .flight/<name> scripts in the repo.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack {
                 Spacer()
-                if selectedRemoteProject?.hasRemoteMode == true {
-                    Button("Remove") {
-                        if let project = selectedRemoteProject {
-                            state.updateRemoteMode(nil, for: project)
-                        }
-                        provision = ""
-                        connect = ""
-                        teardown = ""
-                        list = ""
+                Button("Save") {
+                    guard let project = selectedRemoteProject else { return }
+                    if remoteAllEmpty {
+                        state.updateRemoteMode(nil, for: project)
+                    } else {
+                        state.updateRemoteMode(RemoteModeConfig(
+                            provision: provision,
+                            connect: connect,
+                            teardown: teardown,
+                            list: list.isEmpty ? nil : list
+                        ), for: project)
                     }
                 }
-                Button("Save") {
-                    guard !provision.isEmpty, !connect.isEmpty, !teardown.isEmpty,
-                          let project = selectedRemoteProject else { return }
-                    state.updateRemoteMode(RemoteModeConfig(
-                        provision: provision,
-                        connect: connect,
-                        teardown: teardown,
-                        list: list.isEmpty ? nil : list
-                    ), for: project)
-                }
                 .buttonStyle(.borderedProminent)
-                .disabled(provision.isEmpty || connect.isEmpty || teardown.isEmpty)
+                .disabled(!remoteAllEmpty && !remoteRequiredFilled)
             }
         }
         .formStyle(.grouped)

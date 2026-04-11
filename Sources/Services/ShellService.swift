@@ -12,14 +12,44 @@ enum ShellError: Error, LocalizedError {
 }
 
 enum ShellService {
+    /// Merges `overrides` into the current process environment. Used so
+    /// callers can inject `FLIGHT_*` vars without blowing away `PATH`, etc.
+    private static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        for (key, value) in overrides { env[key] = value }
+        return env
+    }
+
+    /// Builds the argv for `/bin/zsh` given a shell command string and
+    /// optional positional args. When `extraArgs` is non-empty, `_` is
+    /// inserted as `$0` so the first extra arg becomes `$1` inside the
+    /// command — letting the command reference `$@`/`$1` naturally.
+    private static func zshArgs(command: String, extraArgs: [String]) -> [String] {
+        var args = ["-l", "-c", command]
+        if !extraArgs.isEmpty {
+            args.append("_")
+            args.append(contentsOf: extraArgs)
+        }
+        return args
+    }
+
     @discardableResult
-    static func run(_ command: String, in directory: String? = nil) async throws -> String {
+    static func run(
+        _ command: String,
+        in directory: String? = nil,
+        environment: [String: String] = [:],
+        extraArgs: [String] = []
+    ) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", command]
+        process.arguments = zshArgs(command: command, extraArgs: extraArgs)
 
         if let directory {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        }
+
+        if !environment.isEmpty {
+            process.environment = mergedEnvironment(environment)
         }
 
         let stdoutPipe = Pipe()
@@ -59,14 +89,20 @@ enum ShellService {
     static func runStreaming(
         _ command: String,
         in directory: String? = nil,
+        environment: [String: String] = [:],
+        extraArgs: [String] = [],
         onLine: @escaping @MainActor (String) -> Void
     ) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", command]
+        process.arguments = zshArgs(command: command, extraArgs: extraArgs)
 
         if let directory {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        }
+
+        if !environment.isEmpty {
+            process.environment = mergedEnvironment(environment)
         }
 
         let stdoutPipe = Pipe()

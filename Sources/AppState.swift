@@ -198,8 +198,12 @@ final class AppState {
 
     func listRunningWorkspaces() async -> [String] {
         guard let project = selectedProject ?? projects.first,
-              let resolved = RemoteScriptsService.resolve(.list, project: project, argument: nil) else { return [] }
-        guard let output = try? await ShellService.run(resolved.command, in: resolved.workingDirectory) else { return [] }
+              let resolved = RemoteScriptsService.resolve(.list, project: project) else { return [] }
+        guard let output = try? await ShellService.run(
+            resolved.command,
+            in: resolved.workingDirectory,
+            environment: resolved.environment
+        ) else { return [] }
         return output.components(separatedBy: "\n").compactMap { line -> String? in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             return trimmed.isEmpty ? nil : trimmed
@@ -208,7 +212,9 @@ final class AppState {
 
     func attachToWorkspace(workspaceName: String, initialPrompt: String) {
         guard let project = selectedProject ?? projects.first else { return }
-        guard let resolvedConnect = RemoteScriptsService.resolve(.connect, project: project, argument: workspaceName) else {
+        guard let resolvedConnect = RemoteScriptsService.resolve(
+            .connect, project: project, workspace: workspaceName
+        ) else {
             showError("Remote mode not configured for this project.")
             return
         }
@@ -225,15 +231,13 @@ final class AppState {
         project.worktrees.append(worktree)
         selectedWorktreeID = worktree.id
 
-        let connectPrefix = resolvedConnect.command.components(separatedBy: " ")
-
         saveConfig()
 
         let connMsg = AgentMessage(role: .system, content: .text("Connecting to \(workspaceName)..."))
         conversation.messages.append(connMsg)
 
         do {
-            try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
+            try startAgent(for: worktree, conversation: conversation, remoteConnect: resolvedConnect)
             conversation.agent?.send(message: initialPrompt)
         } catch {
             showError("Failed to connect: \(error.localizedDescription)")
@@ -267,12 +271,15 @@ final class AppState {
         provisioningTasks[worktreeID] = Task {
             do {
                 // 1. Provision: run the provision command, stream output as progress
-                guard let resolvedProvision = RemoteScriptsService.resolve(.provision, project: project, argument: branch) else {
+                guard let resolvedProvision = RemoteScriptsService.resolve(
+                    .provision, project: project, branch: branch
+                ) else {
                     throw ShellError.failed(command: "provision", exitCode: -1, stderr: "Remote provision not configured")
                 }
                 let workspaceName = try await ShellService.runStreaming(
                     resolvedProvision.command,
-                    in: resolvedProvision.workingDirectory ?? project.path
+                    in: resolvedProvision.workingDirectory ?? project.path,
+                    environment: resolvedProvision.environment
                 ) { [weak conversation] line in
                     let msg = AgentMessage(role: .system, content: .provisionLog(line))
                     conversation?.messages.append(msg)
@@ -283,11 +290,12 @@ final class AppState {
                 worktree.workspaceName = workspaceName
                 worktree.path = workspaceName // use workspace name as identifier
 
-                // 2. Build connect prefix
-                guard let resolvedConnect = RemoteScriptsService.resolve(.connect, project: project, argument: workspaceName) else {
+                // 2. Resolve connect wrapper for the new workspace
+                guard let resolvedConnect = RemoteScriptsService.resolve(
+                    .connect, project: project, workspace: workspaceName
+                ) else {
                     throw ShellError.failed(command: "connect", exitCode: -1, stderr: "Remote connect not configured")
                 }
-                let connectPrefix = resolvedConnect.argv
 
                 saveConfig()
 
@@ -295,8 +303,8 @@ final class AppState {
                 let connMsg = AgentMessage(role: .system, content: .text("Workspace \(workspaceName) ready. Connecting agent..."))
                 conversation.messages.append(connMsg)
 
-                // 4. Start agent with connect prefix and send initial prompt
-                try startAgent(for: worktree, conversation: conversation, commandPrefix: connectPrefix)
+                // 4. Start agent with connect wrapper and send initial prompt
+                try startAgent(for: worktree, conversation: conversation, remoteConnect: resolvedConnect)
 
                 // Notify when first response arrives
                 let previousHandler = conversation.agent?.onBusyChanged
@@ -344,8 +352,14 @@ final class AppState {
                 $0.id != worktree.id && $0.workspaceName == workspaceName
             }
             if !othersOnSameWorkspace,
-               let resolved = RemoteScriptsService.resolve(.teardown, project: project, argument: workspaceName) {
-                _ = try? await ShellService.run(resolved.command, in: resolved.workingDirectory)
+               let resolved = RemoteScriptsService.resolve(
+                .teardown, project: project, workspace: workspaceName
+               ) {
+                _ = try? await ShellService.run(
+                    resolved.command,
+                    in: resolved.workingDirectory,
+                    environment: resolved.environment
+                )
             }
         } else {
             do {
@@ -398,7 +412,11 @@ final class AppState {
 
     // MARK: - Agent Management
 
-    func startAgent(for worktree: Worktree, conversation: Conversation, commandPrefix: [String]? = nil) throws {
+    func startAgent(
+        for worktree: Worktree,
+        conversation: Conversation,
+        remoteConnect: ResolvedRemoteCommand? = nil
+    ) throws {
         conversation.agent?.stop()
 
         let project = projectForWorktree(worktree)
@@ -406,13 +424,15 @@ final class AppState {
             ConfigService.logFileURL(repoName: $0.name, branch: worktree.branch)
         }
 
-        // Build connect prefix for remote worktrees
-        var prefix = commandPrefix ?? []
-        if prefix.isEmpty, worktree.isRemote,
+        // Auto-resolve the connect wrapper for remote worktrees when the
+        // caller didn't pass one (e.g. resume-on-launch path).
+        var connect = remoteConnect
+        if connect == nil, worktree.isRemote,
            let workspaceName = worktree.workspaceName,
-           let project = projectForWorktree(worktree),
-           let resolved = RemoteScriptsService.resolve(.connect, project: project, argument: workspaceName) {
-            prefix = resolved.argv
+           let project {
+            connect = RemoteScriptsService.resolve(
+                .connect, project: project, workspace: workspaceName
+            )
         }
 
         let agent = ClaudeAgent()
@@ -437,7 +457,7 @@ final class AppState {
             in: worktree.path,
             resumeSessionID: conversation.sessionID,
             logFile: logFile,
-            commandPrefix: prefix
+            remoteConnect: connect
         )
         conversation.agent = agent
         worktree.status = .running
@@ -663,13 +683,14 @@ final class AppState {
         guard worktree.isRemote,
               let workspaceName = worktree.workspaceName,
               let project = projectForWorktree(worktree),
-              let resolved = RemoteScriptsService.resolve(.connect, project: project, argument: workspaceName) else {
+              let resolved = RemoteScriptsService.resolve(
+                .connect, project: project, workspace: workspaceName
+              ) else {
             showError("Remote session is only available for remote worktrees.")
             return
         }
 
         let conversation = worktree.activeConversation
-        let connectCmd = resolved.command
 
         var claudeArgs = "claude"
         if let sessionID = conversation?.sessionID {
@@ -679,7 +700,7 @@ final class AppState {
         // Use tmux to give claude a real PTY so it stays alive as an
         // interactive session visible in the Claude Code mobile app.
         let tmuxSession = "flight-\(worktree.branch.replacingOccurrences(of: "/", with: "-"))"
-        let command = "\(connectCmd) \"tmux new-session -d -s \(tmuxSession) '\(claudeArgs)'\""
+        let tmuxCmd = "tmux new-session -d -s \(tmuxSession) '\(claudeArgs)'"
 
         if let conversation {
             let msg = AgentMessage(role: .system, content: .text("Starting remote session on \(workspaceName)..."))
@@ -688,7 +709,12 @@ final class AppState {
 
         Task {
             do {
-                try await ShellService.run(command)
+                try await ShellService.run(
+                    resolved.command,
+                    in: resolved.workingDirectory,
+                    environment: resolved.environment,
+                    extraArgs: [tmuxCmd]
+                )
                 if let conversation {
                     conversation.remoteSessionActive = true
                     conversation.handoffMessageCount = conversation.messages.count
@@ -710,16 +736,21 @@ final class AppState {
               worktree.isRemote,
               let workspaceName = worktree.workspaceName,
               let project = projectForWorktree(worktree),
-              let resolved = RemoteScriptsService.resolve(.connect, project: project, argument: workspaceName) else { return }
-
-        let connectCmd = resolved.command
+              let resolved = RemoteScriptsService.resolve(
+                .connect, project: project, workspace: workspaceName
+              ) else { return }
 
         // `claude export` dumps the session transcript as JSONL.
         // Adjust this command if the CLI surface changes.
-        let fetchCmd = "\(connectCmd) \"claude export --session \(sessionID) --format jsonl\""
+        let fetchCmd = "claude export --session \(sessionID) --format jsonl"
 
         do {
-            let output = try await ShellService.run(fetchCmd)
+            let output = try await ShellService.run(
+                resolved.command,
+                in: resolved.workingDirectory,
+                environment: resolved.environment,
+                extraArgs: [fetchCmd]
+            )
             let lines = output.components(separatedBy: "\n").filter { !$0.isEmpty }
 
             // Parse each line as a {role, content} object

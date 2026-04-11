@@ -10,7 +10,10 @@ final class ClaudeAgent {
     private var directory: String = ""
     private var logFile: URL?
     private var pendingMessages: [String] = []
-    private var commandPrefix: [String] = [] // e.g. ["coder", "ssh", "workspace", "--"]
+    /// When non-nil, the agent talks to a remote workspace by wrapping its
+    /// per-turn invocation through this connect command (e.g. a
+    /// `.flight/connect` script or a custom `coder ssh ...` template).
+    private var remoteConnect: ResolvedRemoteCommand?
 
     private(set) var isRunning = false
     private(set) var isBusy = false
@@ -23,12 +26,12 @@ final class ClaudeAgent {
         in directory: String,
         resumeSessionID: String? = nil,
         logFile: URL? = nil,
-        commandPrefix: [String] = []
+        remoteConnect: ResolvedRemoteCommand? = nil
     ) throws {
         self.directory = directory
         self.logFile = logFile
         self.sessionID = resumeSessionID
-        self.commandPrefix = commandPrefix
+        self.remoteConnect = remoteConnect
 
         if logHandle == nil, let logFile {
             FileManager.default.createFile(atPath: logFile.path, contents: nil)
@@ -117,7 +120,7 @@ final class ClaudeAgent {
         let stdout = Pipe()
         let stderr = Pipe()
 
-        let isRemote = !commandPrefix.isEmpty
+        let isRemote = remoteConnect != nil
 
         var claudeArgs = [
             "claude",
@@ -142,17 +145,28 @@ final class ClaudeAgent {
             claudeArgs += ["--resume", sessionID]
         }
 
-        if isRemote {
+        if let remoteConnect {
             // Write message as base64 to a temp file on remote, then cat it into claude's prompt.
             // Format: claude -p "$(cat /tmp/...)" --flags...
+            // NOTE: this string is passed as a single positional arg to the
+            // connect wrapper — no outer shell re-parses it, so the $ / "
+            // characters are NOT escaped. The remote shell parses them.
             let b64 = Data(message.utf8).base64EncodedString()
             let flags = claudeArgs.dropFirst(2).joined(separator: " ") // drop "claude" and "-p"
-            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && claude -p \\\"\\$(cat /tmp/flight-prompt.txt)\\\" \(flags)"
-            let sshCmd = commandPrefix.joined(separator: " ") + " \"\(remoteCmd)\""
+            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && claude -p \"$(cat /tmp/flight-prompt.txt)\" \(flags)"
 
-            log("=== REMOTE CMD: \(sshCmd) ===")
+            log("=== REMOTE CONNECT: \(remoteConnect.command) ===")
+            log("=== REMOTE ARG: \(remoteCmd) ===")
             proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            proc.arguments = ["-l", "-c", sshCmd]
+            proc.arguments = ["-l", "-c", remoteConnect.command, "_", remoteCmd]
+            if let cwd = remoteConnect.workingDirectory {
+                proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
+            }
+            if !remoteConnect.environment.isEmpty {
+                var env = ProcessInfo.processInfo.environment
+                for (key, value) in remoteConnect.environment { env[key] = value }
+                proc.environment = env
+            }
         } else {
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             proc.arguments = claudeArgs
