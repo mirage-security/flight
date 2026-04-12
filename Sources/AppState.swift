@@ -240,7 +240,7 @@ final class AppState {
             // before the agent ever spawns, so dependencies are deterministic and
             // the agent's sandbox can keep rejecting dynamic installs.
             if let resolved = WorktreeSetupService.resolveScript(project: project, worktreePath: wtPath) {
-                conversation.messages.append(
+                conversation.appendMessage(
                     AgentMessage(role: .system, content: .setupLog("Running setup script..."))
                 )
                 do {
@@ -249,7 +249,7 @@ final class AppState {
                         in: wtPath
                     ) { [weak conversation] line in
                         let msg = AgentMessage(role: .system, content: .setupLog(line))
-                        conversation?.messages.append(msg)
+                        conversation?.appendMessage(msg)
                     }
                 } catch {
                     // Leave the worktree on disk so the user can inspect/retry.
@@ -315,7 +315,7 @@ final class AppState {
         saveConfig()
 
         let connMsg = AgentMessage(role: .system, content: .text("Connecting to \(workspaceName)..."))
-        conversation.messages.append(connMsg)
+        conversation.appendMessage(connMsg)
 
         do {
             try startAgent(for: worktree, conversation: conversation, remoteConnect: resolvedConnect)
@@ -377,7 +377,7 @@ final class AppState {
                         return
                     }
                     let msg = AgentMessage(role: .system, content: .provisionLog(line))
-                    conversation?.messages.append(msg)
+                    conversation?.appendMessage(msg)
                 }
 
                 // Workspace name is the last non-metadata, non-empty line.
@@ -403,7 +403,7 @@ final class AppState {
 
                 // 3. Connected!
                 let connMsg = AgentMessage(role: .system, content: .text("Workspace \(workspaceName) ready. Connecting agent..."))
-                conversation.messages.append(connMsg)
+                conversation.appendMessage(connMsg)
 
                 // 4. Start agent with connect wrapper and send initial prompt
                 try startAgent(for: worktree, conversation: conversation, remoteConnect: resolvedConnect)
@@ -547,13 +547,15 @@ final class AppState {
         }
 
         let agent = ClaudeAgent()
-        agent.onMessage = { [weak conversation] message in
+        agent.onMessages = { [weak conversation] messages in
             guard let conversation else { return }
-            if case .toolUse(let name, _) = message.content {
-                if name == "EnterPlanMode" { conversation.planMode = true }
-                else if name == "ExitPlanMode" { conversation.planMode = false }
+            for message in messages {
+                if case .toolUse(let name, _) = message.content {
+                    if name == "EnterPlanMode" { conversation.planMode = true }
+                    else if name == "ExitPlanMode" { conversation.planMode = false }
+                }
             }
-            conversation.messages.append(message)
+            conversation.appendMessages(messages)
             ConfigService.scheduleSaveMessages(conversation.messages, conversationID: conversation.id)
         }
         agent.onSessionID = { [weak self, weak conversation] sessionID in
@@ -581,7 +583,7 @@ final class AppState {
     func interruptAgent(for conversation: Conversation, in worktree: Worktree) {
         conversation.agent?.interrupt()
         let msg = AgentMessage(role: .system, content: .text("Interrupted"))
-        conversation.messages.append(msg)
+        conversation.appendMessage(msg)
         ConfigService.saveMessages(conversation.messages, conversationID: conversation.id)
     }
 
@@ -633,7 +635,7 @@ final class AppState {
     }
 
     func clearChat(for conversation: Conversation) {
-        conversation.messages.removeAll()
+        conversation.clearMessages()
         ConfigService.saveMessages([], conversationID: conversation.id)
     }
 
@@ -815,7 +817,7 @@ final class AppState {
 
         if let conversation {
             let msg = AgentMessage(role: .system, content: .text("Starting remote session on \(workspaceName)..."))
-            conversation.messages.append(msg)
+            conversation.appendMessage(msg)
         }
 
         Task {
@@ -830,7 +832,7 @@ final class AppState {
                     conversation.remoteSessionActive = true
                     conversation.handoffMessageCount = conversation.messages.count
                     let msg = AgentMessage(role: .system, content: .text("Remote session started — available in Claude Code mobile app"))
-                    conversation.messages.append(msg)
+                    conversation.appendMessage(msg)
                     ConfigService.saveMessages(conversation.messages, conversationID: conversation.id)
                     saveConfig()
                 }
@@ -891,24 +893,23 @@ final class AppState {
             if remoteMsgs.count > handoff {
                 let newMsgs = Array(remoteMsgs[handoff...])
 
-                let separator = AgentMessage(
+                var syncBatch = [AgentMessage(
                     role: .system,
                     content: .text("Synced \(newMsgs.count) message\(newMsgs.count == 1 ? "" : "s") from remote session")
-                )
-                conversation.messages.append(separator)
-
+                )]
                 for msg in newMsgs {
-                    conversation.messages.append(
+                    syncBatch.append(
                         AgentMessage(role: msg.role, content: .text(msg.text))
                     )
                 }
+                conversation.appendMessages(syncBatch)
             }
         } catch {
             let msg = AgentMessage(
                 role: .system,
                 content: .text("Could not sync remote session — continuing from last known state")
             )
-            conversation.messages.append(msg)
+            conversation.appendMessage(msg)
         }
 
         conversation.remoteSessionActive = false

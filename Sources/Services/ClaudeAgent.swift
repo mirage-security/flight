@@ -18,7 +18,7 @@ final class ClaudeAgent {
     private(set) var isRunning = false
     private(set) var isBusy = false
     private(set) var sessionID: String?
-    var onMessage: ((AgentMessage) -> Void)?
+    var onMessages: (([AgentMessage]) -> Void)?
     var onSessionID: ((String) -> Void)?
     var onBusyChanged: ((Bool) -> Void)?
 
@@ -49,7 +49,7 @@ final class ClaudeAgent {
         // Add user message to the chat locally immediately
         let displayText = images.isEmpty ? message : "\(message)\n[📎 \(images.count) image\(images.count == 1 ? "" : "s") attached]"
         let userMessage = AgentMessage(role: .user, content: .text(displayText))
-        onMessage?(userMessage)
+        onMessages?([userMessage])
 
         if isBusy {
             // Queue it — will fire when current turn completes
@@ -285,6 +285,15 @@ final class ClaudeAgent {
 
                 lineBuffer.append(data)
 
+                // Parse all complete lines from this read into a batch,
+                // then dispatch once to MainActor. This collapses N per-line
+                // hops into 1, keeping the main thread free during fast streaming.
+                var batchMessages: [AgentMessage] = []
+                var newSessionID: String?
+                var turnDone = false
+                var controlResponses: [(id: String, allow: Bool)] = []
+                var logLines: [String] = []
+
                 while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
                     let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
                     lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
@@ -292,44 +301,43 @@ final class ClaudeAgent {
                     guard !lineData.isEmpty else { continue }
 
                     let lineStr = String(data: Data(lineData), encoding: .utf8) ?? "<binary>"
-                    await MainActor.run { [weak self] in
-                        self?.log("<<< STDOUT: \(lineStr)")
+                    logLines.append(lineStr)
+
+                    guard let event = try? JSONDecoder().decode(StreamEvent.self, from: Data(lineData)) else { continue }
+
+                    if event.type == "system", let sid = event.sessionID {
+                        newSessionID = sid
                     }
-
-                    if let event = try? JSONDecoder().decode(StreamEvent.self, from: Data(lineData)) {
-                        if event.type == "system", let sid = event.sessionID {
-                            await MainActor.run { [weak self] in
-                                self?.sessionID = sid
-                                self?.onSessionID?(sid)
-                            }
-                        }
-
-                        // Result event means the turn is done
-                        if event.type == "result" {
-                            await MainActor.run { [weak self] in
-                                self?.onTurnComplete()
-                            }
-                        }
-
-                        // Auto-approve tool permission requests, but DENY sandbox overrides.
-                        // This keeps the agent sandboxed to its worktree directory.
-                        if event.type == "control_request",
-                           let reqID = event.requestID {
-                            let isSandboxOverride = event.request?.input?["dangerouslyDisableSandbox"] != nil
-                            let allow = !isSandboxOverride
-                            await MainActor.run { [weak self] in
-                                self?.respondToControlRequest(requestID: reqID, allow: allow)
-                                self?.log("=== \(allow ? "Approved" : "DENIED (sandbox override)") control_request \(reqID) ===")
-                            }
-                        }
-
-                        let messages = event.toAgentMessages()
-                        for message in messages {
-                            await MainActor.run { [weak self] in
-                                self?.onMessage?(message)
-                            }
-                        }
+                    if event.type == "result" {
+                        turnDone = true
                     }
+                    if event.type == "control_request", let reqID = event.requestID {
+                        let isSandboxOverride = event.request?.input?["dangerouslyDisableSandbox"] != nil
+                        controlResponses.append((id: reqID, allow: !isSandboxOverride))
+                    }
+                    batchMessages.append(contentsOf: event.toAgentMessages())
+                }
+
+                if logLines.isEmpty { continue }
+
+                let messages = batchMessages
+                let done = turnDone
+                let lines = logLines
+                let sid = newSessionID
+                let crs = controlResponses
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    for line in lines { self.log("<<< STDOUT: \(line)") }
+                    if let sid {
+                        self.sessionID = sid
+                        self.onSessionID?(sid)
+                    }
+                    for cr in crs {
+                        self.respondToControlRequest(requestID: cr.id, allow: cr.allow)
+                        self.log("=== \(cr.allow ? "Approved" : "DENIED (sandbox override)") control_request \(cr.id) ===")
+                    }
+                    if !messages.isEmpty { self.onMessages?(messages) }
+                    if done { self.onTurnComplete() }
                 }
             }
         }

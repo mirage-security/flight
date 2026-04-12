@@ -4,7 +4,8 @@ import Foundation
 final class Conversation: Identifiable {
     let id: UUID
     var name: String
-    var messages: [AgentMessage]
+    private(set) var messages: [AgentMessage]
+    private(set) var sections: [ChatSection] = []
     var sessionID: String?
     var agentBusy: Bool = false
     var planMode: Bool = false
@@ -29,6 +30,28 @@ final class Conversation: Identifiable {
         self.messages = []
         self.sessionID = sessionID
     }
+
+    // MARK: - Message Mutation (always rebuilds sections)
+
+    func appendMessage(_ message: AgentMessage) {
+        messages.append(message)
+        sections = ChatSection.build(from: messages)
+    }
+
+    func appendMessages(_ newMessages: [AgentMessage]) {
+        messages.append(contentsOf: newMessages)
+        sections = ChatSection.build(from: messages)
+    }
+
+    func setMessages(_ newMessages: [AgentMessage]) {
+        messages = newMessages
+        sections = ChatSection.build(from: messages)
+    }
+
+    func clearMessages() {
+        messages.removeAll()
+        sections = []
+    }
 }
 
 struct ConversationConfig: Codable {
@@ -48,7 +71,7 @@ struct ConversationConfig: Codable {
 
     func toConversation() -> Conversation {
         let conv = Conversation(id: id, name: name, sessionID: sessionID)
-        conv.messages = ConfigService.loadMessages(conversationID: id)
+        conv.setMessages(ConfigService.loadMessages(conversationID: id))
         conv.remoteSessionActive = remoteSessionActive ?? false
         conv.handoffMessageCount = handoffMessageCount
         return conv

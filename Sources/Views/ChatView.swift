@@ -356,8 +356,7 @@ struct ChatMessageListView: View {
     }
 
     private var sections: [ChatSection] {
-        guard let conversation else { return [] }
-        return ChatSection.build(from: conversation.messages)
+        conversation?.sections ?? []
     }
 
     /// True while the worktree is being created and a setup script is
