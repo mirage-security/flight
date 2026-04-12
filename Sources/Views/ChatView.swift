@@ -805,6 +805,7 @@ struct ToolGroupView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -908,6 +909,7 @@ struct ProvisionGroupView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
