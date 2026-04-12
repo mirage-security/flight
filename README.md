@@ -12,8 +12,9 @@ Built as an internal tool for daily agentic coding work. Open-sourced so others 
 - Spin up isolated git worktrees per task, each running its own Claude Code agent
 - Chat with agents in a streaming UI with collapsible tool calls and markdown rendering
 - Run agents locally (sandboxed) or remotely via SSH (e.g. Coder, EC2, any machine)
+- Add **remote-only projects** with no local clone — Flight fetches `.flight/` scripts from the repo via the forge API and runs everything remotely
 - Open worktrees directly in VS Code — local paths or through Remote-SSH for remote workspaces
-- Per-worktree PR creation, CI check status, reviewer feedback (GitHub and Forgejo)
+- Per-worktree CI check status and reviewer feedback (GitHub and Forgejo), with `gh --repo` so remote-only projects get PR/CI too
 - Multiple conversations per worktree with tab support
 - Base16 theme engine with 6 built-in themes + import support
 
@@ -47,6 +48,13 @@ swift run Flight
 2. **Cmd+N** creates a new worktree with a random branch name and starts a Claude agent
 3. Chat in the input bar, hit **Enter** to send
 4. **Escape** interrupts the agent mid-turn
+
+### Adding a project
+
+Click **Add Project** in the sidebar. The sheet has two modes:
+
+- **Local** — pick a folder on disk. The name defaults to the folder's basename, and you can rename it (handy for having a local `mirage` alongside a remote-only `mirage`).
+- **Remote** — point at a forge repo and Flight will fetch its scripts on your behalf. See [Remote-only projects](#remote-only-projects) below.
 
 ### Remote workspaces
 
@@ -93,6 +101,22 @@ And `.flight/connect`:
 #!/usr/bin/env bash
 exec coder ssh "${FLIGHT_WORKSPACE:?}" -- "$@"
 ```
+
+### Remote-only projects
+
+A remote-only project has no local clone. You point Flight at a forge repo (GitHub or Forgejo), it downloads the repo's committed `.flight/` scripts, and it uses those to spin up remote workspaces — same contract as Remote workspaces above, just sourced from the forge instead of a local checkout.
+
+1. Click **Add Project** in the sidebar and switch to the **Remote** tab
+2. Pick a forge type and enter the repo as `owner/name`, `github.com/owner/name`, or a full URL
+3. (Forgejo only) provide the base URL and the env var that holds your API token
+4. Hit **Add**. Flight fetches `.flight/provision`, `.flight/connect`, `.flight/teardown`, and (if present) `.flight/list` via `gh api repos/<owner>/<repo>/contents/.flight/<script>` (GitHub) or the Forgejo raw endpoint, caches them under `~/flight/remote-scripts/<name>/`, and adds the project
+5. Use **Cmd+Shift+N** to spin up workspaces as normal — there's no Cmd+N flow because there's no local clone to cut worktrees from
+
+Settings-level overrides (**Settings > Remote**) are ignored for remote-only projects. The repo is the source of truth; if you change a script, push to the default branch and re-add the project.
+
+PR/CI features work the same way: Flight calls `gh --repo owner/name` (or the Forgejo REST API) with the owner/repo you provided, so CI checks and reviewer feedback show up without a local checkout.
+
+To have a local and remote-only project for the same repo side by side, add the local one first and rename it in the sheet (or add the remote-only one first — either order works, the collision is surfaced at add time).
 
 ### `FLIGHT_OUTPUT` metadata
 
@@ -143,7 +167,7 @@ Sources/
   AppState.swift              Central @Observable state
   Theme.swift                 Base16 theme engine
   Models/
-    Project.swift             Repo reference + remote config
+    Project.swift             Repo reference (path optional for remote-only) + remote config
     Worktree.swift            Branch, status, conversations, remote metadata
     Conversation.swift        Per-tab agent session
     AgentMessage.swift        Parsed stream-json messages
@@ -154,13 +178,14 @@ Sources/
     ConfigService.swift       ~/flight/config.json persistence
     GitService.swift          git worktree operations
     ShellService.swift        Async process runner with env/extraArgs support
-    RemoteScriptsService.swift Resolves .flight/<script> + settings templates
+    RemoteScriptsService.swift Resolves .flight/<script>: on-disk for local, fetched cache for remote-only
+    RemoteScriptFetcher.swift Downloads .flight/* from a forge repo for remote-only projects
     WorktreeSetupService.swift Runs .flight/worktree-setup for new local worktrees
     NotificationService.swift  macOS user notifications
   Plugins/
-    ForgeProvider.swift       Git hosting abstraction
-    GitHubForge.swift         GitHub implementation (gh CLI)
-    ForgejoForge.swift        Forgejo implementation
+    ForgeProvider.swift       Git hosting abstraction (path-free; owner/repo baked in at construction)
+    GitHubForge.swift         Local (gh in repo) + Remote (gh --repo owner/name) impls
+    ForgejoForge.swift        Local + Remote Forgejo REST impls
   Views/
     ContentView.swift         Main layout, sheets, error alerts
     SidebarView.swift         Project/worktree list
@@ -169,6 +194,7 @@ Sources/
     MarkdownText.swift        Lightweight markdown renderer
     InputBarView.swift        Text input, plan mode, stop button
     PasteableTextView.swift   NSTextView wrapper for reliable keyboard handling
+    AddProjectSheet.swift     Local/Remote add-project modal
     ProjectPickerSheet.swift  Command-palette project picker for Cmd+N / Cmd+Shift+N
     SettingsView.swift        Themes, font size, worktree setup, remote config
 ```
@@ -192,6 +218,7 @@ All data lives in `~/flight/`:
   logs/                    Raw stdin/stdout logs per worktree
   themes/                  Imported Base16 theme files
   worktrees/               Git worktree directories
+  remote-scripts/          Cached .flight/* for remote-only projects (one dir per project)
 ```
 
 ## License
