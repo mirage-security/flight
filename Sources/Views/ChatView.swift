@@ -296,8 +296,15 @@ struct ChatMessageListView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+        // ScrollViewReader + explicit scrollTo instead of
+        // defaultScrollAnchor(.bottom): the default anchor needs accurate
+        // content size, but LazyVStack reports estimated heights for
+        // unrealized cells, so the anchor lands past the real content and
+        // the viewport draws empty until the user scrolls. Targeting an
+        // explicit id materializes that cell and positions it correctly.
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if showingSetupPlaceholder {
                         ProvisionGroupView(
                             logs: Self.placeholderSetupLogs,
@@ -351,11 +358,50 @@ struct ChatMessageListView: View {
                         ThinkingIndicator()
                             .id("thinking")
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomAnchorID)
                 }
                 .padding()
             }
-            .defaultScrollAnchor(.bottom)
+            .onAppear {
+                scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: conversation?.id) { _, _ in
+                scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: conversation?.messages.count ?? 0) { _, _ in
+                scrollToBottom(proxy, animated: true)
+            }
+            .onChange(of: lastMessageLength) { _, _ in
+                scrollToBottom(proxy, animated: false)
+            }
         }
+    }
+
+    private static let bottomAnchorID = "chat-bottom"
+
+    /// Tracks the last message's rendered length so streaming updates
+    /// (which don't change `messages.count`) still re-pin the bottom.
+    private var lastMessageLength: Int {
+        conversation?.messages.last?.textContent.count ?? 0
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        let scroll = {
+            if animated {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        }
+        // Defer one runloop tick so LazyVStack has had a chance to realize
+        // the new content before we compute the target frame.
+        DispatchQueue.main.async(execute: scroll)
+    }
 }
 
 // MARK: - PR Status Strip (isolated observation scope)
