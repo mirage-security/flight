@@ -16,21 +16,23 @@ struct SidebarView: View {
                             Text(project.name)
                                 .font(.system(size: 12, weight: .semibold))
                             Spacer()
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(theme.secondaryText)
-                                .onTapGesture {
-                                    state.selectedProjectID = project.id
-                                    // Remote-only projects have no local clone, so
-                                    // the + always means "new remote worktree".
-                                    let wantRemote = project.isRemoteOnly
-                                        || (NSEvent.modifierFlags.contains(.shift) && project.hasRemoteMode)
-                                    if wantRemote {
-                                        state.showingRemotePrompt = true
-                                    } else {
-                                        Task { await state.createWorktreeWithRandomName() }
-                                    }
+                            Button {
+                                state.selectedProjectID = project.id
+                                let wantRemote = project.isRemoteOnly
+                                    || (NSEvent.modifierFlags.contains(.shift) && project.hasRemoteMode)
+                                if wantRemote {
+                                    state.showingRemotePrompt = true
+                                } else {
+                                    Task { await state.createWorktreeWithRandomName() }
                                 }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(theme.secondaryText)
+                                    .frame(width: 22, height: 22)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
                         .foregroundStyle(theme.secondaryText)
                         .padding(.horizontal, 12)
@@ -143,7 +145,7 @@ struct WorktreeRow: View {
                 .foregroundStyle(isSelected ? .white.opacity(0.7) : statusColor)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(.vertical, 6)
         .background(
             isSelected
                 ? RoundedRectangle(cornerRadius: 6).fill(theme.accent)

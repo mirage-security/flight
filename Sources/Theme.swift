@@ -50,7 +50,7 @@ struct Base16Scheme: Codable {
             inputBackground: bgLight,
             text: fg,
             secondaryText: fgDim,
-            userBubble: blue.opacity(0.2),
+            userBubble: blue.opacity(0.25),
             assistantBubble: bgLight,
             toolGroupBackground: bgLight.opacity(0.8),
             border: border.opacity(0.5),

@@ -87,8 +87,10 @@ struct ChatView: View {
                     state.removeConversation(conv, from: worktree)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(theme.secondaryText.opacity(0.6))
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -112,12 +114,13 @@ struct ChatView: View {
     // MARK: - Header
 
     private var chatHeader: some View {
-        HStack {
+        HStack(spacing: 8) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
             Text(worktree.branch)
                 .font(.headline)
+                .lineLimit(1)
             if worktree.isRemote && worktree.workspaceName != nil {
                 Button {
                     state.openRemoteSession(for: worktree)
@@ -125,6 +128,8 @@ struct ChatView: View {
                     Image(systemName: "terminal")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .tooltip("Open remote session in Terminal (⌘⇧R)")
@@ -136,6 +141,8 @@ struct ChatView: View {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .tooltip("Open \(urlString)")
@@ -157,11 +164,32 @@ struct ChatView: View {
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .tooltip("Open in VS Code")
             }
             Spacer()
+
+            if let count = conversation?.messages.count, count > 0 {
+                let textCount = conversation?.messages.filter { $0.role == .user || (!$0.isToolUse && !$0.isToolResult && $0.role == .assistant) }.count ?? 0
+                Text("\(textCount) messages")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.secondaryText)
+            }
+
+            if let startDate = conversation?.agent?.turnStartDate {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = Int(context.date.timeIntervalSince(startDate))
+                    let mins = elapsed / 60
+                    let secs = elapsed % 60
+                    Text(mins > 0 ? "\(mins)m \(secs)s" : "\(secs)s")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.orange)
+                }
+            }
+
             Text(headerStatusLabel)
                 .font(.caption)
                 .foregroundStyle(headerStatusColor)
@@ -780,11 +808,21 @@ struct ToolGroupView: View {
             }
         }
         .background(theme.toolGroupBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(theme.border.opacity(0.5), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 8,
+                bottomLeadingRadius: 8,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0
+            )
+            .fill(theme.orange)
+            .frame(width: 3)
+        }
     }
 }
 

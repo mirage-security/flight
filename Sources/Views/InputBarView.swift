@@ -48,12 +48,12 @@ struct InputBarView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: planMode ? "map.fill" : "map")
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
                         Text(planMode ? "Plan" : "Code")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                     }
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.vertical, 5)
                     .background(planMode ? theme.purple.opacity(0.15) : theme.inputBackground)
                     .foregroundStyle(planMode ? theme.purple : theme.secondaryText)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -75,12 +75,12 @@ struct InputBarView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "stop.fill")
-                                .font(.system(size: 8))
+                                .font(.system(size: 10))
                             Text("Stop")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                         }
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 5)
                         .background(theme.red.opacity(0.15))
                         .foregroundStyle(theme.red)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -127,7 +127,7 @@ struct InputBarView: View {
             }
 
             // Input row
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 PasteableTextView(
                     text: $messageText,
                     font: .systemFont(ofSize: CGFloat(fontSize)),
@@ -143,27 +143,29 @@ struct InputBarView: View {
                     }
                 )
                 .frame(minHeight: 40, maxHeight: 150)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(theme.inputBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(theme.border, lineWidth: 1)
-                )
-                .disabled(isRemoteSessionActive)
-                .opacity(isRemoteSessionActive ? 0.4 : 1)
 
                 Button {
                     sendMessage()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                        .font(.system(size: 22))
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(canSend ? theme.accent : theme.secondaryText)
                 .disabled(!canSend)
+                .frame(width: 36, height: 36)
+                .padding(.trailing, 4)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(theme.inputBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(theme.border, lineWidth: 1)
+            )
+            .disabled(isRemoteSessionActive)
+            .opacity(isRemoteSessionActive ? 0.4 : 1)
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
@@ -204,12 +206,12 @@ struct InputBarView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                 Text(selectedModelLabel ?? "Model")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .background(theme.inputBackground)
             .foregroundStyle(selectedModelID == nil ? theme.secondaryText : theme.text)
             .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -249,12 +251,12 @@ struct InputBarView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "brain")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                 Text(selectedEffort?.label ?? "Effort")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .background(theme.inputBackground)
             .foregroundStyle(selectedEffort == nil ? theme.secondaryText : theme.text)
             .clipShape(RoundedRectangle(cornerRadius: 6))

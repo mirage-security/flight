@@ -18,6 +18,7 @@ final class ClaudeAgent {
 
     private(set) var isRunning = false
     private(set) var isBusy = false
+    private(set) var turnStartDate: Date?
     private(set) var sessionID: String?
     var onMessages: (([AgentMessage]) -> Void)?
     var onSessionID: ((String) -> Void)?
@@ -232,6 +233,7 @@ final class ClaudeAgent {
         }
 
         isBusy = true
+        turnStartDate = Date()
         onBusyChanged?(true)
         startReading()
 
@@ -277,6 +279,7 @@ final class ClaudeAgent {
     private func onTurnComplete() {
         guard isBusy else { return }
         isBusy = false
+        turnStartDate = nil
         onBusyChanged?(false)
 
         // Process queued messages

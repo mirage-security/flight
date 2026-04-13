@@ -18,7 +18,7 @@ struct MessageView: View, Equatable {
 
     var body: some View {
         HStack {
-            if isUserMessage { Spacer(minLength: 80) }
+            if isUserMessage { Spacer(minLength: 40) }
 
             Group {
                 if isUserMessage {
@@ -44,8 +44,7 @@ struct MessageView: View, Equatable {
                         .padding(6)
                 }
             }
-
-            if !isUserMessage { Spacer(minLength: 80) }
+            .frame(maxWidth: isUserMessage ? 520 : .infinity, alignment: isUserMessage ? .trailing : .leading)
         }
         .onHover { isHovered = $0 }
     }
@@ -65,9 +64,9 @@ struct ToolCallRow: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(theme.secondaryText)
-                        .frame(width: 10)
+                        .frame(width: 12)
 
                     if message.isToolUse {
                         if case .toolUse(let name, _) = message.content {
