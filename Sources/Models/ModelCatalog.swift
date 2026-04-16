@@ -28,6 +28,8 @@ enum ModelCatalog {
 
     static let families: [Family] = [
         Family(id: "opus", label: "Opus", entries: [
+            Entry(id: "claude-opus-4-7",      label: "Opus 4.7"),
+            Entry(id: "claude-opus-4-7[1m]",  label: "Opus 4.7 (1M)"),
             Entry(id: "claude-opus-4-6",      label: "Opus 4.6"),
             Entry(id: "claude-opus-4-6[1m]",  label: "Opus 4.6 (1M)"),
             Entry(id: "claude-opus-4-5",      label: "Opus 4.5"),

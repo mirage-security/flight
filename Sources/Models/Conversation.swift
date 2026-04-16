@@ -6,6 +6,7 @@ enum ConversationEffort: String, Codable, CaseIterable, Identifiable {
     case low
     case medium
     case high
+    case xhigh
     case max
     var id: String { rawValue }
     var label: String {
@@ -13,6 +14,7 @@ enum ConversationEffort: String, Codable, CaseIterable, Identifiable {
         case .low: return "Low"
         case .medium: return "Medium"
         case .high: return "High"
+        case .xhigh: return "Extra High"
         case .max: return "Max"
         }
     }
