@@ -417,7 +417,13 @@ struct ChatMessageListView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        let scroll = {
+        // First pass (next runloop) nudges LazyVStack into realizing the
+        // bottom anchor — for long conversations its estimated frame can land
+        // way below the real content, leaving the viewport blank. Second pass
+        // (one frame later) re-pins against the now-correct layout and runs
+        // the animation the caller asked for.
+        let prime = { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+        let pin = {
             if animated {
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
@@ -426,9 +432,8 @@ struct ChatMessageListView: View {
                 proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
         }
-        // Defer one runloop tick so LazyVStack has had a chance to realize
-        // the new content before we compute the target frame.
-        DispatchQueue.main.async(execute: scroll)
+        DispatchQueue.main.async(execute: prime)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016, execute: pin)
     }
 }
 
