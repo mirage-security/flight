@@ -52,17 +52,12 @@ final class ClaudeAgent {
         images: [Data] = [],
         planMode: Bool = false,
         model: String? = nil,
-        effort: String? = nil,
-        skipUserEcho: Bool = false
+        effort: String? = nil
     ) {
-        // Add user message to the chat locally immediately, unless the caller
-        // already rendered it (e.g. flushing a pending send from before the
-        // worktree finished provisioning).
-        if !skipUserEcho {
-            let displayText = images.isEmpty ? message : "\(message)\n[📎 \(images.count) image\(images.count == 1 ? "" : "s") attached]"
-            let userMessage = AgentMessage(role: .user, content: .text(displayText))
-            onMessages?([userMessage])
-        }
+        // Add user message to the chat locally immediately
+        let displayText = images.isEmpty ? message : "\(message)\n[📎 \(images.count) image\(images.count == 1 ? "" : "s") attached]"
+        let userMessage = AgentMessage(role: .user, content: .text(displayText))
+        onMessages?([userMessage])
 
         if isBusy {
             // Queue it — will fire when current turn completes

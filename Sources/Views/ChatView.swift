@@ -387,6 +387,23 @@ struct ChatMessageListView: View {
                             .id("thinking")
                     }
 
+                    // Queued-while-provisioning preview. Rendered outside the
+                    // section list so ChatSection.build doesn't split the
+                    // provision group around it. When flushPendingSend fires,
+                    // pendingSend clears and agent.send's echo puts a real
+                    // user bubble in-order below the provision block.
+                    if let pending = conversation?.pendingSend {
+                        let previewText = pending.images.isEmpty
+                            ? pending.text
+                            : "\(pending.text)\n[📎 \(pending.images.count) image\(pending.images.count == 1 ? "" : "s") attached]"
+                        MessageView(
+                            message: AgentMessage(role: .user, content: .text(previewText))
+                        )
+                        .equatable()
+                        .opacity(0.55)
+                        .id("queued-send")
+                    }
+
                     Color.clear
                         .frame(height: 1)
                         .id(Self.bottomAnchorID)
@@ -404,6 +421,9 @@ struct ChatMessageListView: View {
             }
             .onChange(of: lastMessageLength) { _, _ in
                 scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: conversation?.pendingSend != nil) { _, _ in
+                scrollToBottom(proxy, animated: true)
             }
         }
     }

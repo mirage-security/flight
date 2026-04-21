@@ -593,9 +593,14 @@ final class AppState {
         // nil, so the connect wrapper can't resolve) and run it against a
         // blank cwd — exactly the bug we're guarding against. The create
         // task calls flushPendingSend after the real agent is up.
+        //
+        // We deliberately do NOT append a user bubble to `messages` here —
+        // ChatSection.build would treat the user bubble as a divider and
+        // split the provision log group around it. Instead, the UI shows
+        // pendingSend as a dimmed preview below the provision block until
+        // the agent spawns; flush then runs a normal `agent.send` which
+        // echoes a real user bubble chronologically after provisioning.
         if worktree.status == .creating {
-            let displayText = images.isEmpty ? text : "\(text)\n[📎 \(images.count) image\(images.count == 1 ? "" : "s") attached]"
-            conversation.appendMessage(AgentMessage(role: .user, content: .text(displayText)))
             conversation.pendingSend = PendingSend(text: text, images: images)
             return
         }
@@ -614,8 +619,8 @@ final class AppState {
     }
 
     /// Flush a message the user queued while the worktree was still
-    /// provisioning. `skipUserEcho` is true because the user bubble was
-    /// already appended at queue time.
+    /// provisioning. The normal send-time echo appends the real user bubble
+    /// *after* the provision block, which is what we want visually.
     private func flushPendingSend(for conversation: Conversation) {
         guard let pending = conversation.pendingSend,
               let agent = conversation.agent else { return }
@@ -625,8 +630,7 @@ final class AppState {
             images: pending.images,
             planMode: conversation.planMode,
             model: conversation.modelID,
-            effort: conversation.effort?.rawValue,
-            skipUserEcho: true
+            effort: conversation.effort?.rawValue
         )
     }
 
