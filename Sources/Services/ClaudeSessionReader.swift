@@ -51,6 +51,7 @@ enum ClaudeSessionReader {
                 switch msg.content {
                 case .some(.text(let t)):
                     guard !t.isEmpty else { continue }
+                    if isSystemInjectedUserText(t) { continue }
                     messages.append(AgentMessage(role: .user, content: .text(t), timestamp: timestamp))
                 case .some(.blocks(let blocks)):
                     // A user event with content blocks is almost always a
@@ -95,6 +96,24 @@ enum ClaudeSessionReader {
         }
 
         return messages
+    }
+
+    /// Claude injects certain out-of-band notifications into the transcript
+    /// as `user`-role text events (e.g. `<task-notification>` for background
+    /// task completion). The live stream reader skips all user events, but
+    /// hydration does need to surface real user messages — so filter by
+    /// known system tags instead.
+    private static let systemInjectedUserPrefixes: [String] = [
+        "<task-notification>",
+        "<system-reminder>",
+        "<command-name>",
+        "<local-command-stdout>",
+        "<local-command-stderr>",
+    ]
+
+    private static func isSystemInjectedUserText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return systemInjectedUserPrefixes.contains { trimmed.hasPrefix($0) }
     }
 
     // MARK: - JSONL schema (subset)

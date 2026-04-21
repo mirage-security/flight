@@ -146,7 +146,7 @@ final class ClaudeAgent {
         // Local: use stdin for input. Remote: pass message as prompt arg (stdin over SSH is unreliable)
         if !isRemote {
             claudeArgs += ["--input-format", "stream-json"]
-            claudeArgs += ["--allowedTools", "Write,Edit,Read,Glob,Grep,Agent,Task,ToolSearch,Skill,EnterPlanMode,ExitPlanMode,EnterWorktree,ExitWorktree,NotebookEdit,WebSearch,WebFetch,TodoWrite,AskUserQuestion"]
+            claudeArgs += ["--allowedTools", "Write,Edit,Read,Glob,Grep,Agent,Task,ToolSearch,Skill,EnterPlanMode,ExitPlanMode,EnterWorktree,ExitWorktree,NotebookEdit,WebSearch,WebFetch,TodoWrite,AskUserQuestion,Bash(gh *),Bash(git *)"]
             claudeArgs += ["--permission-mode", planMode ? "plan" : "auto"]
             // Sandbox: filesystem scoped to cwd (worktree), network domains approved
             // via control_request handler. allowUnsandboxedCommands=false makes the
@@ -338,8 +338,8 @@ final class ClaudeAgent {
                         turnDone = true
                     }
                     if event.type == "control_request", let reqID = event.requestID {
-                        let isSandboxOverride = event.request?.input?["dangerouslyDisableSandbox"] != nil
-                        controlResponses.append((id: reqID, allow: !isSandboxOverride))
+                        let allow = Self.shouldApproveControlRequest(event.request)
+                        controlResponses.append((id: reqID, allow: allow))
                     }
                     batchMessages.append(contentsOf: event.toAgentMessages())
                 }
@@ -360,13 +360,49 @@ final class ClaudeAgent {
                     }
                     for cr in crs {
                         self.respondToControlRequest(requestID: cr.id, allow: cr.allow)
-                        self.log("=== \(cr.allow ? "Approved" : "DENIED (sandbox override)") control_request \(cr.id) ===")
+                        self.log("=== \(cr.allow ? "Approved" : "DENIED") control_request \(cr.id) ===")
                     }
                     if !messages.isEmpty { self.onMessages?(messages) }
                     if done { self.onTurnComplete() }
                 }
             }
         }
+    }
+
+    // Hardcoded allowlist of hosts we'll auto-approve SandboxNetworkAccess
+    // for. Anything off this list gets denied so the agent can't silently
+    // reach arbitrary endpoints. Revisit this as a user-editable setting
+    // once the UI has a control_request prompt surface.
+    //
+    // Package registries (npm/yarn/pypi/…) are intentionally omitted:
+    // dependencies should be installed by `.flight/worktree-setup` before
+    // the agent ever spawns. At agent runtime, needing the registry means
+    // "add a new package" — a decision worth a human confirming, and the
+    // denial turns a compromised postinstall's exfil traffic into a loud
+    // failure instead of a silent approval.
+    private static let allowedNetworkHosts: Set<String> = [
+        "api.github.com",
+        "github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "codeload.github.com",
+    ]
+
+    private static func shouldApproveControlRequest(_ request: StreamEvent.ControlRequest?) -> Bool {
+        guard let request else { return false }
+        // Defense-in-depth: refuse any request that tries to disable the
+        // sandbox outright. --settings already has allowUnsandboxedCommands=false
+        // so the CLI shouldn't forward these, but deny regardless.
+        if request.input?["dangerouslyDisableSandbox"] != nil { return false }
+
+        // Network access is gated by host. Everything else (file system
+        // access inside the sandbox, ad-hoc tool approvals) we approve —
+        // the sandbox is the real containment boundary.
+        if request.toolName == "SandboxNetworkAccess" {
+            guard let host = request.input?["host"]?.value as? String else { return false }
+            return allowedNetworkHosts.contains(host)
+        }
+        return true
     }
 
     deinit {
