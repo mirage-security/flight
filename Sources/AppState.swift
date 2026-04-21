@@ -297,7 +297,13 @@ final class AppState {
         project.worktrees.append(worktree)
         selectedWorktreeID = worktree.id
 
-        // Add a system message showing provisioning
+        // Kick off immediate UI feedback — remote provision commands can
+        // stay silent for a few seconds before their first stdout line, and
+        // a blank chat looks like "nothing is happening" to the user.
+        appendFlightEvent(
+            .provisionLog("Provisioning \(branch)…"),
+            to: conversation
+        )
 
         let worktreeID = worktree.id
         provisioningTasks[worktreeID] = Task {
