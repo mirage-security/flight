@@ -1241,25 +1241,33 @@ struct PlanItem {
     }
 }
 
-// MARK: - System Message (interrupts, etc.)
+// MARK: - System Message (interrupts, workspace/session notes, etc.)
 
 struct SystemMessageView: View {
     let message: AgentMessage
     @Environment(\.theme) private var theme
 
+    /// "Interrupted" is the one stop-style event that warrants red
+    /// styling. Everything else flowing through `.system(.text(...))` is
+    /// an informational note (workspace ready, remote session started,
+    /// sync results, …) and should render neutrally.
+    private var isInterrupt: Bool {
+        message.textContent == "Interrupted"
+    }
+
     var body: some View {
         HStack {
             Spacer()
             HStack(spacing: 6) {
-                Image(systemName: "stop.circle")
+                Image(systemName: isInterrupt ? "stop.circle" : "info.circle")
                     .font(.system(size: 12))
                 Text(message.textContent)
                     .font(.system(size: 12, weight: .medium))
             }
-            .foregroundStyle(theme.red)
+            .foregroundStyle(isInterrupt ? theme.red : theme.secondaryText)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(theme.red.opacity(0.08))
+            .background((isInterrupt ? theme.red : theme.secondaryText).opacity(0.08))
             .clipShape(Capsule())
             Spacer()
         }
