@@ -182,6 +182,19 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .tooltip("Open in VS Code")
             }
+            if let conv = conversation, !conv.messages.isEmpty {
+                Button {
+                    exportConversation(conv)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .tooltip("Export conversation as JSONL")
+            }
             Spacer()
 
             if let count = conversation?.messages.count, count > 0 {
@@ -254,6 +267,35 @@ struct ChatView: View {
 
     private var statusColor: Color {
         headerStatusColor
+    }
+
+    // MARK: - Export
+
+    private func exportConversation(_ conv: Conversation) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "jsonl") ?? .json]
+        panel.nameFieldStringValue = defaultExportFilename(for: conv)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let lines = try conv.messages.map { try encoder.encode($0) }
+                .map { String(data: $0, encoding: .utf8) ?? "" }
+            let body = lines.joined(separator: "\n") + "\n"
+            try body.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            state.errorMessage = "Export failed: \(error.localizedDescription)"
+            state.showingError = true
+        }
+    }
+
+    private func defaultExportFilename(for conv: Conversation) -> String {
+        let safeBranch = worktree.branch.replacingOccurrences(of: "/", with: "-")
+        let safeName = conv.name.replacingOccurrences(of: "/", with: "-")
+        return "\(safeBranch)-\(safeName).jsonl"
     }
 
     // MARK: - Search
