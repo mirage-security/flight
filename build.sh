@@ -4,6 +4,21 @@ set -e
 APP="Flight.app"
 BINARY_NAME="Flight"
 
+DO_KILL=0
+DO_OPEN=0
+for arg in "$@"; do
+    case "$arg" in
+        kill) DO_KILL=1 ;;
+        open) DO_OPEN=1 ;;
+        *) echo "Unknown arg: $arg (expected: kill, open)" >&2; exit 1 ;;
+    esac
+done
+
+if [ "$DO_KILL" = 1 ]; then
+    echo "Killing running $BINARY_NAME instances..."
+    pkill -x "$BINARY_NAME" 2>/dev/null || true
+fi
+
 echo "Building release binary..."
 swift build -c release
 
@@ -43,4 +58,10 @@ cat > "$APP/Contents/Info.plist" << 'EOF'
 EOF
 
 echo "Done: $APP"
-echo "Run with: open $APP"
+
+if [ "$DO_OPEN" = 1 ]; then
+    echo "Opening $APP..."
+    open "$APP"
+else
+    echo "Run with: open $APP"
+fi

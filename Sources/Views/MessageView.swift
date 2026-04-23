@@ -3,15 +3,29 @@ import FlightCore
 
 struct MessageView: View, Equatable {
     let message: AgentMessage
+    var searchQuery: String = ""
+    var currentMatchID: String? = nil
     @AppStorage("flightFontSize") private var fontSize: Double = 14
     @Environment(\.theme) private var theme
 
     static func == (lhs: MessageView, rhs: MessageView) -> Bool {
         lhs.message == rhs.message
+            && lhs.searchQuery == rhs.searchQuery
+            && lhs.currentMatchID == rhs.currentMatchID
     }
 
     private var isUserMessage: Bool {
         message.role == .user
+    }
+
+    private var hasMatches: Bool {
+        guard !searchQuery.isEmpty else { return false }
+        return message.textContent.range(of: searchQuery, options: .caseInsensitive) != nil
+    }
+
+    private var containsCurrentMatch: Bool {
+        guard let id = currentMatchID else { return false }
+        return id.hasPrefix("\(message.id)-")
     }
 
     @State private var isHovered = false
@@ -22,10 +36,16 @@ struct MessageView: View, Equatable {
 
             Group {
                 if isUserMessage {
-                    Text(message.textContent)
+                    Text(displayedAttributedString)
                         .font(.system(size: fontSize))
                         .foregroundStyle(theme.text)
                         .textSelection(.enabled)
+                } else if hasMatches {
+                    Text(displayedAttributedString)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(theme.text)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     MarkdownText(message.textContent, fontSize: fontSize)
                 }
@@ -35,7 +55,7 @@ struct MessageView: View, Equatable {
             .background(isUserMessage ? theme.userBubble : theme.assistantBubble)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(isUserMessage ? Color.clear : theme.border, lineWidth: 1)
+                    .stroke(bubbleStrokeColor, lineWidth: containsCurrentMatch ? 2 : 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .bottomTrailing) {
@@ -47,6 +67,40 @@ struct MessageView: View, Equatable {
             .frame(maxWidth: isUserMessage ? 520 : .infinity, alignment: isUserMessage ? .trailing : .leading)
         }
         .onHover { isHovered = $0 }
+    }
+
+    private var bubbleStrokeColor: Color {
+        if containsCurrentMatch { return theme.orange }
+        if isUserMessage { return .clear }
+        return theme.border
+    }
+
+    /// Builds an `AttributedString` that highlights every case-insensitive
+    /// occurrence of `searchQuery` in the message. The occurrence matching
+    /// `currentMatchID` gets a stronger highlight than the rest. Falls back
+    /// to plain text when no query is active.
+    private var displayedAttributedString: AttributedString {
+        var attr = AttributedString(message.textContent)
+        guard !searchQuery.isEmpty else { return attr }
+
+        let text = message.textContent
+        let lowered = text.lowercased()
+        let lowerQuery = searchQuery.lowercased()
+        var cursor = lowered.startIndex
+        while cursor < lowered.endIndex,
+              let range = lowered.range(of: lowerQuery, range: cursor..<lowered.endIndex) {
+            let ns = NSRange(range, in: lowered)
+            let matchID = "\(message.id)-\(ns.location)"
+            if let attrRange = Range(ns, in: attr) {
+                let isCurrent = matchID == currentMatchID
+                attr[attrRange].backgroundColor = isCurrent
+                    ? Color.yellow
+                    : Color.yellow.opacity(0.35)
+                attr[attrRange].foregroundColor = Color.black
+            }
+            cursor = range.upperBound
+        }
+        return attr
     }
 }
 

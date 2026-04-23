@@ -5,6 +5,7 @@ struct SettingsView: View {
 
     @AppStorage("flightFontSize") private var fontSize: Double = 14
     @AppStorage("flightTheme") private var selectedTheme: String = "System"
+    @AppStorage("flightDefaultModel") private var defaultModel: String = ""
     @State private var showingImport = false
     @State private var themeNames: [String] = []
 
@@ -43,6 +44,17 @@ struct SettingsView: View {
             }
             .onChange(of: selectedTheme) { _, newValue in
                 ThemeManager.shared.apply(name: newValue)
+            }
+
+            Picker("Default Model", selection: $defaultModel) {
+                Text("CLI Default").tag("")
+                ForEach(ModelCatalog.families) { family in
+                    Section(family.label) {
+                        ForEach(family.entries) { entry in
+                            Text(entry.label).tag(entry.id)
+                        }
+                    }
+                }
             }
 
             HStack {

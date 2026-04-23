@@ -52,6 +52,11 @@ final class Conversation: Identifiable {
     /// Used to detect which messages in the remote transcript are "new".
     var handoffMessageCount: Int?
 
+    // In-conversation search (session-only, not persisted).
+    var searchActive: Bool = false
+    var searchQuery: String = ""
+    var currentSearchMatchIndex: Int = 0
+
     init(
         id: UUID = UUID(),
         name: String = "Chat",

@@ -65,6 +65,38 @@ struct FlightApp: App {
                 .disabled(state.selectedWorktree == nil)
             }
 
+            // Cmd+F / Cmd+G / Cmd+Shift+G — Find in conversation
+            CommandGroup(after: .textEditing) {
+                Button("Find…") {
+                    if let conv = state.selectedWorktree?.activeConversation {
+                        conv.searchActive = true
+                    }
+                }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(state.selectedWorktree?.activeConversation == nil)
+
+                Button("Find Next") {
+                    if let conv = state.selectedWorktree?.activeConversation, conv.searchActive {
+                        let matches = SearchScanner.scan(query: conv.searchQuery, sections: conv.sections)
+                        guard !matches.isEmpty else { return }
+                        conv.currentSearchMatchIndex = (conv.currentSearchMatchIndex + 1) % matches.count
+                    }
+                }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(state.selectedWorktree?.activeConversation?.searchActive != true)
+
+                Button("Find Previous") {
+                    if let conv = state.selectedWorktree?.activeConversation, conv.searchActive {
+                        let matches = SearchScanner.scan(query: conv.searchQuery, sections: conv.sections)
+                        guard !matches.isEmpty else { return }
+                        let count = matches.count
+                        conv.currentSearchMatchIndex = ((conv.currentSearchMatchIndex - 1) % count + count) % count
+                    }
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(state.selectedWorktree?.activeConversation?.searchActive != true)
+            }
+
             // Custom commands
             CommandMenu("Worktree") {
                 // Cmd+W — Close tab if multiple, otherwise close window

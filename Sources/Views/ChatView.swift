@@ -22,6 +22,18 @@ struct ChatView: View {
 
             Divider()
 
+            if let conv = conversation, conv.searchActive {
+                let matches = SearchScanner.scan(query: conv.searchQuery, sections: conv.sections)
+                SearchBar(
+                    conversation: conv,
+                    matchCount: matches.count,
+                    onNext: { advanceSearch(conv, matches: matches, by: 1) },
+                    onPrev: { advanceSearch(conv, matches: matches, by: -1) },
+                    onClose: { closeSearch(conv) }
+                )
+                Divider()
+            }
+
             ChatMessageListView(
                 state: state,
                 worktree: worktree
@@ -170,6 +182,19 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .tooltip("Open in VS Code")
             }
+            if let conv = conversation, !conv.messages.isEmpty {
+                Button {
+                    exportConversation(conv)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .tooltip("Export conversation as JSONL")
+            }
             Spacer()
 
             if let count = conversation?.messages.count, count > 0 {
@@ -244,6 +269,49 @@ struct ChatView: View {
         headerStatusColor
     }
 
+    // MARK: - Export
+
+    private func exportConversation(_ conv: Conversation) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "jsonl") ?? .json]
+        panel.nameFieldStringValue = defaultExportFilename(for: conv)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let lines = try conv.messages.map { try encoder.encode($0) }
+                .map { String(data: $0, encoding: .utf8) ?? "" }
+            let body = lines.joined(separator: "\n") + "\n"
+            try body.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            state.errorMessage = "Export failed: \(error.localizedDescription)"
+            state.showingError = true
+        }
+    }
+
+    private func defaultExportFilename(for conv: Conversation) -> String {
+        let safeBranch = worktree.branch.replacingOccurrences(of: "/", with: "-")
+        let safeName = conv.name.replacingOccurrences(of: "/", with: "-")
+        return "\(safeBranch)-\(safeName).jsonl"
+    }
+
+    // MARK: - Search
+
+    private func advanceSearch(_ conv: Conversation, matches: [SearchMatch], by direction: Int) {
+        guard !matches.isEmpty else { return }
+        let count = matches.count
+        conv.currentSearchMatchIndex = ((conv.currentSearchMatchIndex + direction) % count + count) % count
+    }
+
+    private func closeSearch(_ conv: Conversation) {
+        conv.searchActive = false
+        conv.searchQuery = ""
+        conv.currentSearchMatchIndex = 0
+    }
+
     /// Local worktrees can always be opened in VS Code (we just shell out
     /// to `code <path>`); remote worktrees need both an `ssh_target` and a
     /// `repo_path` from the provision script's FLIGHT_OUTPUT.
@@ -301,6 +369,28 @@ struct ChatMessageListView: View {
         conversation?.sections ?? []
     }
 
+    private var searchQuery: String {
+        guard let conv = conversation, conv.searchActive else { return "" }
+        return conv.searchQuery
+    }
+
+    private var searchMatches: [SearchMatch] {
+        guard !searchQuery.isEmpty else { return [] }
+        return SearchScanner.scan(query: searchQuery, sections: sections)
+    }
+
+    private var currentSearchMatch: SearchMatch? {
+        let matches = searchMatches
+        guard !matches.isEmpty,
+              let idx = conversation?.currentSearchMatchIndex,
+              idx >= 0, idx < matches.count else { return nil }
+        return matches[idx]
+    }
+
+    private func matches(forMessage messageID: UUID) -> [SearchMatch] {
+        searchMatches.filter { $0.messageID == messageID }
+    }
+
     /// True while the worktree is being created and a setup script is
     /// configured but no real setup output has streamed in yet. We render a
     /// placeholder ProvisionGroupView in this state so the user gets immediate
@@ -345,7 +435,12 @@ struct ChatMessageListView: View {
                     ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
                         switch section {
                         case .message(let message):
-                            MessageView(message: message)
+                            MessageView(
+                                message: message,
+                                searchQuery: searchQuery,
+                                currentMatchID: currentSearchMatch?.messageID == message.id
+                                    ? currentSearchMatch?.id : nil
+                            )
                                 .equatable()
                                 .id(section.id)
                         case .toolGroup(_, let tools):
@@ -417,13 +512,37 @@ struct ChatMessageListView: View {
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: conversation?.messages.count ?? 0) { _, _ in
+                guard !isSearching else { return }
                 scrollToBottom(proxy, animated: true)
             }
             .onChange(of: lastMessageLength) { _, _ in
+                guard !isSearching else { return }
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: conversation?.pendingSend != nil) { _, _ in
+                guard !isSearching else { return }
                 scrollToBottom(proxy, animated: true)
+            }
+            .onChange(of: conversation?.searchQuery ?? "") { _, _ in
+                conversation?.currentSearchMatchIndex = 0
+                scrollToCurrentMatch(proxy)
+            }
+            .onChange(of: conversation?.currentSearchMatchIndex ?? 0) { _, _ in
+                scrollToCurrentMatch(proxy)
+            }
+        }
+    }
+
+    private var isSearching: Bool {
+        guard let conv = conversation else { return false }
+        return conv.searchActive && !conv.searchQuery.isEmpty
+    }
+
+    private func scrollToCurrentMatch(_ proxy: ScrollViewProxy) {
+        guard let match = currentSearchMatch else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo(match.sectionID, anchor: .center)
             }
         }
     }

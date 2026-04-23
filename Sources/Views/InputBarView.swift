@@ -41,57 +41,6 @@ struct InputBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Plan mode bar
-            HStack(spacing: 6) {
-                Button {
-                    conversation?.planMode.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: planMode ? "map.fill" : "map")
-                            .font(.system(size: 12))
-                        Text(planMode ? "Plan" : "Code")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(planMode ? theme.purple.opacity(0.15) : theme.inputBackground)
-                    .foregroundStyle(planMode ? theme.purple : theme.secondaryText)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(planMode ? theme.purple.opacity(0.3) : theme.border, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-
-                modelMenu
-                effortMenu
-
-                Spacer()
-
-                if isAgentBusy, let conversation {
-                    Button {
-                        state.interruptAgent(for: conversation, in: worktree)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 10))
-                            Text("Stop")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(theme.red.opacity(0.15))
-                        .foregroundStyle(theme.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
-
             // Image attachment previews
             if !attachedImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -126,8 +75,10 @@ struct InputBarView: View {
                 }
             }
 
-            // Input row
-            HStack(spacing: 0) {
+            // Input container: text area on top, controls row underneath.
+            // Keeping the controls in a dedicated row (not overlaid) means a
+            // growing message can never visually intersect them.
+            VStack(alignment: .leading, spacing: 6) {
                 PasteableTextView(
                     text: $messageText,
                     font: .systemFont(ofSize: CGFloat(fontSize)),
@@ -144,20 +95,22 @@ struct InputBarView: View {
                 )
                 .frame(minHeight: 40, maxHeight: 150)
 
-                Button {
-                    sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 22))
+                HStack(spacing: 6) {
+                    planModeButton
+                    modelMenu
+                    effortMenu
+
+                    Spacer()
+
+                    if isAgentBusy {
+                        stopButton
+                    } else {
+                        sendButton
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(canSend ? theme.accent : theme.secondaryText)
-                .disabled(!canSend)
-                .frame(width: 36, height: 36)
-                .padding(.trailing, 4)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
             .background(theme.inputBackground)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(
@@ -167,9 +120,60 @@ struct InputBarView: View {
             .disabled(isRemoteSessionActive)
             .opacity(isRemoteSessionActive ? 0.4 : 1)
             .padding(.horizontal, 12)
+            .padding(.top, 6)
             .padding(.bottom, 8)
         }
         .background(theme.headerBackground)
+    }
+
+    private var planModeButton: some View {
+        Button {
+            conversation?.planMode.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: planMode ? "map.fill" : "map")
+                    .font(.system(size: 12))
+                Text(planMode ? "Plan" : "Code")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(planMode ? theme.purple.opacity(0.15) : Color.clear)
+            .foregroundStyle(planMode ? theme.purple : theme.secondaryText)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(planMode ? theme.purple.opacity(0.3) : theme.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sendButton: some View {
+        Button {
+            sendMessage()
+        } label: {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.system(size: 22))
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(canSend ? theme.accent : theme.secondaryText)
+        .disabled(!canSend)
+        .frame(width: 28, height: 28)
+    }
+
+    private var stopButton: some View {
+        Button {
+            if let conversation {
+                state.interruptAgent(for: conversation, in: worktree)
+            }
+        } label: {
+            Image(systemName: "stop.circle.fill")
+                .font(.system(size: 22))
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(theme.red)
+        .frame(width: 28, height: 28)
     }
 
     private var isRemoteSessionActive: Bool {
@@ -212,7 +216,6 @@ struct InputBarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(theme.inputBackground)
             .foregroundStyle(selectedModelID == nil ? theme.secondaryText : theme.text)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
@@ -257,7 +260,6 @@ struct InputBarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(theme.inputBackground)
             .foregroundStyle(selectedEffort == nil ? theme.secondaryText : theme.text)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
