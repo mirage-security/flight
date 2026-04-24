@@ -8,6 +8,7 @@ public enum MessageRole: String, Codable {
 
 public enum MessageContent: Codable, Equatable {
     case text(String)
+    case thinking(String)
     case toolUse(name: String, input: String)
     case toolResult(content: String)
     case permissionRequest(requestID: String, description: String)
@@ -37,6 +38,8 @@ public struct AgentMessage: Identifiable, Codable, Equatable {
         switch content {
         case .text(let text):
             return text
+        case .thinking(let text):
+            return text
         case .toolUse(let name, let input):
             return "[\(name)] \(input)"
         case .toolResult(let content):
@@ -48,6 +51,11 @@ public struct AgentMessage: Identifiable, Codable, Equatable {
         case .setupLog(let line):
             return line
         }
+    }
+
+    public var isThinking: Bool {
+        if case .thinking = content { return true }
+        return false
     }
 
     public var isToolUse: Bool {
@@ -111,5 +119,47 @@ public struct AgentMessage: Identifiable, Codable, Equatable {
             return nil
         }
         return desc
+    }
+
+    /// Best single-line preview for a tool call — picks the most meaningful
+    /// parameter per tool type. Falls back to `description` for unknown tools.
+    public var toolPreview: String? {
+        guard case .toolUse(let name, let input) = content,
+              let data = input.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        func str(_ key: String) -> String? { dict[key] as? String }
+        func basename(_ path: String) -> String { (path as NSString).lastPathComponent }
+
+        switch name {
+        case "Bash":
+            return str("description") ?? str("command")
+        case "Read", "Edit", "MultiEdit", "Write", "NotebookEdit":
+            return str("file_path").map(basename)
+        case "Grep":
+            guard let pattern = str("pattern") else { return nil }
+            if let path = str("path") {
+                return "\"\(pattern)\" in \(basename(path))"
+            }
+            return "\"\(pattern)\""
+        case "Glob":
+            return str("pattern")
+        case "WebFetch":
+            return str("url")
+        case "WebSearch":
+            return str("query")
+        case "TodoWrite":
+            guard let todos = dict["todos"] as? [[String: Any]] else { return nil }
+            if let active = todos.first(where: { ($0["status"] as? String) == "in_progress" }),
+               let content = active["content"] as? String {
+                return content
+            }
+            return "\(todos.count) todo\(todos.count == 1 ? "" : "s")"
+        case "Task", "Agent":
+            return str("description") ?? str("subagent_type")
+        default:
+            return str("description") ?? str("query") ?? str("pattern")
+        }
     }
 }

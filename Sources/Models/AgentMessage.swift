@@ -60,6 +60,7 @@ struct StreamEvent: Decodable {
     struct ContentBlock: Decodable {
         let type: String
         let text: String?
+        let thinking: String?
         let name: String?
         let input: AnyCodable?
         let content: String?
@@ -119,6 +120,9 @@ extension StreamEvent {
                 case "text":
                     guard let text = block.text, !text.isEmpty else { return nil }
                     return AgentMessage(role: role, content: .text(text))
+                case "thinking":
+                    guard let text = block.thinking ?? block.text, !text.isEmpty else { return nil }
+                    return AgentMessage(role: role, content: .thinking(text))
                 case "tool_use":
                     let name = block.name ?? "unknown"
                     let input = block.input?.jsonString ?? "{}"

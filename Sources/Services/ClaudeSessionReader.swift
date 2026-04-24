@@ -78,6 +78,10 @@ enum ClaudeSessionReader {
                         if let t = block.text, !t.isEmpty {
                             messages.append(AgentMessage(role: .assistant, content: .text(t), timestamp: timestamp))
                         }
+                    case "thinking":
+                        if let t = block.thinking ?? block.text, !t.isEmpty {
+                            messages.append(AgentMessage(role: .assistant, content: .thinking(t), timestamp: timestamp))
+                        }
                     case "tool_use":
                         let name = block.name ?? "unknown"
                         let input = block.input?.jsonString ?? "{}"
@@ -152,6 +156,7 @@ enum ClaudeSessionReader {
         struct Block: Decodable {
             let type: String
             let text: String?
+            let thinking: String?
             let name: String?
             let input: AnyCodable?
             let content: String?

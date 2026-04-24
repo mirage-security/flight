@@ -127,8 +127,8 @@ struct ToolCallRow: View {
                             Text(name)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(theme.orange)
-                            if let desc = message.toolDescription {
-                                Text(desc)
+                            if let preview = message.toolPreview, !preview.isEmpty {
+                                Text(preview)
                                     .font(.system(size: 11))
                                     .foregroundStyle(theme.secondaryText)
                                     .lineLimit(1)

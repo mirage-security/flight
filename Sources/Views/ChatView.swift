@@ -369,6 +369,14 @@ struct ChatMessageListView: View {
         conversation?.sections ?? []
     }
 
+    private var lastSectionAbsorbsThinkingIndicator: Bool {
+        guard let last = sections.last else { return false }
+        switch last {
+        case .toolGroup, .thinkingGroup: return true
+        default: return false
+        }
+    }
+
     private var searchQuery: String {
         guard let conv = conversation, conv.searchActive else { return "" }
         return conv.searchQuery
@@ -447,6 +455,10 @@ struct ChatMessageListView: View {
                             let isLast = index == sections.count - 1
                             ToolGroupView(tools: tools, isActive: isLast && isThinking)
                                 .id(section.id)
+                        case .thinkingGroup(_, let thoughts):
+                            let isLast = index == sections.count - 1
+                            ThinkingGroupView(thoughts: thoughts, isActive: isLast && isThinking)
+                                .id(section.id)
                         case .provisionGroup(_, let logs):
                             let isLast = index == sections.count - 1
                             ProvisionGroupView(
@@ -477,7 +489,7 @@ struct ChatMessageListView: View {
                         }
                     }
 
-                    if isThinking && !(sections.last.map { if case .toolGroup = $0 { true } else { false } } ?? false) {
+                    if isThinking, !lastSectionAbsorbsThinkingIndicator {
                         ThinkingIndicator()
                             .id("thinking")
                     }
@@ -902,6 +914,11 @@ struct ToolGroupView: View {
         tools.filter(\.isToolUse).count
     }
 
+    private var latestToolUse: AgentMessage? {
+        for msg in tools.reversed() where msg.isToolUse { return msg }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
@@ -928,9 +945,7 @@ struct ToolGroupView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(theme.text)
 
-                    Text(toolNames)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.secondaryText)
+                    headerDetail
                         .lineLimit(1)
 
                     Spacer()
@@ -951,6 +966,7 @@ struct ToolGroupView: View {
                 .padding(.bottom, 8)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: latestToolUse?.id)
         .background(theme.toolGroupBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -966,6 +982,145 @@ struct ToolGroupView: View {
             )
             .fill(theme.orange)
             .frame(width: 3)
+        }
+    }
+
+    @ViewBuilder
+    private var headerDetail: some View {
+        if isActive, !isExpanded, let latest = latestToolUse,
+           case .toolUse(let name, _) = latest.content {
+            HStack(spacing: 4) {
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.orange)
+                if let preview = latest.toolPreview, !preview.isEmpty {
+                    Text(preview)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+                }
+            }
+            .id(latest.id)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else {
+            Text(toolNames)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.secondaryText)
+        }
+    }
+}
+
+// MARK: - Thinking Group (collapsed chain-of-thought)
+
+struct ThinkingGroupView: View {
+    let thoughts: [AgentMessage]
+    var isActive: Bool = false
+    @Environment(\.theme) private var theme
+    @State private var isExpanded = false
+
+    private var latestThought: AgentMessage? {
+        thoughts.last
+    }
+
+    /// One-line preview: last non-empty line of the latest thought.
+    private var latestLine: String? {
+        guard let text = latestThought?.textContent else { return nil }
+        let line = text
+            .split(whereSeparator: \.isNewline)
+            .last
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespaces)
+        return (line?.isEmpty ?? true) ? nil : line
+    }
+
+    private var headerLabel: String {
+        isActive ? "Thinking" : "Thought"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 12)
+
+                    if isActive {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+
+                    Text(headerLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.text)
+
+                    headerDetail
+                        .lineLimit(1)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(thoughts) { thought in
+                        Text(thought.textContent)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.secondaryText)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: latestThought?.id)
+        .background(theme.toolGroupBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.border.opacity(0.5), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 8,
+                bottomLeadingRadius: 8,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0
+            )
+            .fill(theme.secondaryText.opacity(0.6))
+            .frame(width: 3)
+        }
+    }
+
+    @ViewBuilder
+    private var headerDetail: some View {
+        if isActive, !isExpanded, let line = latestLine, let latest = latestThought {
+            Text(line)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.secondaryText)
+                .italic()
+                .id(latest.id)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else if !isExpanded, thoughts.count > 1 {
+            Text("\(thoughts.count) thoughts")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.secondaryText)
+        } else {
+            EmptyView()
         }
     }
 }
