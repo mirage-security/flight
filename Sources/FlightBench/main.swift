@@ -149,6 +149,14 @@ var targets: [PerfTarget] = [
     PerfTarget(name: "large payload avg (50KB x 50)", limit: 6.0, unit: "ms"),
     PerfTarget(name: "heavy conv p99 (2k msgs 50KB)", limit: 8.0, unit: "ms"),
     PerfTarget(name: "heavy conv avg (2k msgs 50KB)", limit: 6.0, unit: "ms"),
+    // Pagination / ForEach identity pass — guards against re-introducing the
+    // crash pattern where per-render-cycle work scales with conversation size.
+    // visibleSections is computed every time ChatMessageListView.body fires.
+    // Section ID enumeration simulates ForEach.IDGenerator.makeID calling
+    // section.id on each visible item (the initializeWithCopy hot path in the
+    // cpu_resource.diag crash trace).
+    PerfTarget(name: "visibleSections slice (500-sec conv)", limit: 0.5, unit: "ms"),
+    PerfTarget(name: "section ID enumeration (150 secs)", limit: 0.5, unit: "ms"),
 ]
 
 // MARK: - Benchmarks (with eval capture)
@@ -322,6 +330,75 @@ func benchmarkHeavyConversationEval() -> (avg: Double, p99: Double) {
     return (avg, p99)
 }
 
+// MARK: - Benchmark 6: Pagination + ForEach identity pass
+
+/// Benchmarks the two per-render-cycle costs introduced by the section
+/// pagination fix (ChatMessageListView.visibleSections) and the ForEach
+/// identity evaluation that was the initializeWithCopy hot path in the
+/// cpu_resource.diag crash.
+///
+/// visibleSections runs every time body re-evaluates (each streaming token,
+/// each new message). Section ID enumeration runs every layout pass inside
+/// the ForEach. Both must stay cheap even for large conversations.
+func benchmarkPaginationEval() -> (sliceAvg: Double, idEnumAvg: Double) {
+    print("=" * 60)
+    print("Benchmark 6: Pagination + ForEach ID enumeration")
+    print("=" * 60)
+    print("")
+
+    // Simulate a large accumulated conversation (long remote session).
+    let messages = generateConversation(count: 500)
+    let allSections = ChatSection.build(from: messages)
+    let pageSize = 150
+    print(String(format: "  Total sections: %d  |  visible (capped): %d",
+        allSections.count, min(allSections.count, pageSize)))
+    print("")
+    print(String(format: "%-40@  %10@  %10@",
+        "Operation" as NSString, "Avg (ms)" as NSString, "P99 (ms)" as NSString))
+    print("-" * 65)
+
+    // 6a: visibleSections slice — Array(allSections.suffix(pageSize))
+    // This mirrors the computed property that runs on every body re-evaluation.
+    var sliceTimes: [Double] = []
+    sliceTimes.reserveCapacity(500)
+    for _ in 0..<500 {
+        let t = measure {
+            let visible = Array(allSections.suffix(pageSize))
+            _blackHole(visible.count)
+        }
+        sliceTimes.append(t)
+    }
+    sliceTimes.sort()
+    let sliceAvg = sliceTimes.reduce(0, +) / Double(sliceTimes.count)
+    let sliceP99 = sliceTimes[min(sliceTimes.count - 1, Int(Double(sliceTimes.count) * 0.99))]
+    print(String(format: "%-40@  %10.4f  %10.4f",
+        "visibleSections slice (500→150)" as NSString, sliceAvg, sliceP99))
+
+    // 6b: Section ID enumeration — iterating visible sections and calling .id
+    // on each. This mirrors ForEach.IDGenerator.makeID's per-item cost.
+    // Using direct section.id access (not the old tuple \.element.id path that
+    // caused initializeWithCopy for ChatSection in the crash trace).
+    let visible = Array(allSections.suffix(pageSize))
+    var idTimes: [Double] = []
+    idTimes.reserveCapacity(500)
+    for _ in 0..<500 {
+        let t = measure {
+            for section in visible {
+                _blackHole(section.id)
+            }
+        }
+        idTimes.append(t)
+    }
+    idTimes.sort()
+    let idAvg = idTimes.reduce(0, +) / Double(idTimes.count)
+    let idP99 = idTimes[min(idTimes.count - 1, Int(Double(idTimes.count) * 0.99))]
+    print(String(format: "%-40@  %10.4f  %10.4f",
+        "section .id enumeration (150 secs)" as NSString, idAvg, idP99))
+
+    print("")
+    return (sliceAvg, idAvg)
+}
+
 // MARK: - Main
 
 print("")
@@ -333,6 +410,7 @@ let bulkTime = benchmarkAppendSimulationEval()
 let rssDeltaMB = benchmarkMemoryEval()
 let (avgLarge, p99Large) = benchmarkLargePayloadsEval()
 let (avgHeavy, p99Heavy) = benchmarkHeavyConversationEval()
+let (sliceAvg, idEnumAvg) = benchmarkPaginationEval()
 
 // Fill in actuals
 targets[0].actual = p99_2k
@@ -343,6 +421,8 @@ targets[4].actual = p99Large
 targets[5].actual = avgLarge
 targets[6].actual = p99Heavy
 targets[7].actual = avgHeavy
+targets[8].actual = sliceAvg
+targets[9].actual = idEnumAvg
 
 // MARK: - Eval Report
 

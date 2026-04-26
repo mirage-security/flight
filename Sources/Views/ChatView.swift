@@ -369,6 +369,10 @@ struct ChatMessageListView: View {
         conversation?.sections ?? []
     }
 
+    private var visibleSections: [ChatSection] {
+        sections
+    }
+
     private var lastSectionAbsorbsThinkingIndicator: Bool {
         guard let last = sections.last else { return false }
         switch last {
@@ -440,7 +444,8 @@ struct ChatMessageListView: View {
                         .id("setup-placeholder")
                     }
 
-                    ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                    ForEach(visibleSections) { section in
+                        let isLast = section.id == visibleSections.last?.id
                         switch section {
                         case .message(let message):
                             MessageView(
@@ -450,41 +455,37 @@ struct ChatMessageListView: View {
                                     ? currentSearchMatch?.id : nil
                             )
                                 .equatable()
-                                .id(section.id)
-                        case .toolGroup(_, let tools):
-                            let isLast = index == sections.count - 1
+                                .id(message.id)
+                        case .toolGroup(let groupID, let tools):
                             ToolGroupView(tools: tools, isActive: isLast && isThinking)
-                                .id(section.id)
-                        case .thinkingGroup(_, let thoughts):
-                            let isLast = index == sections.count - 1
+                                .id(groupID)
+                        case .thinkingGroup(let groupID, let thoughts):
                             ThinkingGroupView(thoughts: thoughts, isActive: isLast && isThinking)
-                                .id(section.id)
-                        case .provisionGroup(_, let logs):
-                            let isLast = index == sections.count - 1
+                                .id(groupID)
+                        case .provisionGroup(let groupID, let logs):
                             ProvisionGroupView(
                                 logs: logs,
                                 isActive: isLast && worktree.status == .creating,
                                 kind: .remoteProvision
                             )
-                                .id(section.id)
-                        case .setupGroup(_, let logs):
-                            let isLast = index == sections.count - 1
+                            .id(groupID)
+                        case .setupGroup(let groupID, let logs):
                             ProvisionGroupView(
                                 logs: logs,
                                 isActive: isLast && worktree.status == .creating,
                                 kind: .worktreeSetup
                             )
-                                .id(section.id)
+                            .id(groupID)
                         case .plan(let message):
                             PlanView(message: message, state: state, worktree: worktree)
-                                .id(section.id)
+                                .id(message.id)
                         case .system(let message):
                             if message.isPermissionRequest, let conversation {
                                 PermissionRequestView(message: message, conversation: conversation, state: state)
-                                    .id(section.id)
+                                    .id(message.id)
                             } else {
                                 SystemMessageView(message: message)
-                                    .id(section.id)
+                                    .id(message.id)
                             }
                         }
                     }
@@ -567,24 +568,31 @@ struct ChatMessageListView: View {
         conversation?.messages.last?.textContent.count ?? 0
     }
 
+    // Guard against queuing hundreds of proxy.scrollTo calls during
+    // streaming (lastMessageLength fires per token).
+    @State private var scrollQueued = false
+
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard !scrollQueued else { return }
+        scrollQueued = true
         // First pass (next runloop) nudges LazyVStack into realizing the
         // bottom anchor — for long conversations its estimated frame can land
         // way below the real content, leaving the viewport blank. Second pass
         // (one frame later) re-pins against the now-correct layout and runs
         // the animation the caller asked for.
-        let prime = { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
-        let pin = {
-            if animated {
-                withAnimation(.easeOut(duration: 0.15)) {
+        DispatchQueue.main.async {
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) {
+                if animated {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                } else {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
-            } else {
-                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                scrollQueued = false
             }
         }
-        DispatchQueue.main.async(execute: prime)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016, execute: pin)
     }
 }
 

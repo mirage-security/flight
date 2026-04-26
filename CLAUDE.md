@@ -25,3 +25,5 @@ assume 120Hz ProMotion (8.3ms frame budget).
 | Large payload avg (50 x 50KB tools) | < 6.0 ms | Same path, average case |
 | Heavy conversation p99 (2000 msgs, 50KB tools) | < 8.0 ms | Combined worst case: high message count + large payloads |
 | Heavy conversation avg (2000 msgs, 50KB tools) | < 6.0 ms | Same, average case |
+| `visibleSections` slice (500-section conv) | < 0.5 ms | Runs every `ChatMessageListView.body` evaluation — streaming fires this per token, so even 0.5ms × 60fps = 30ms/s overhead is too much if it regresses |
+| Section ID enumeration (150 visible secs) | < 0.5 ms | Simulates `ForEach.IDGenerator.makeID` calling `section.id` per item per layout pass — the `initializeWithCopy for ChatSection` hot path from the cpu_resource.diag hang |

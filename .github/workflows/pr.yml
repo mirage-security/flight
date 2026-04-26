@@ -25,3 +25,6 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+      - name: Run benchmarks
+        run: swift run -c release FlightBench
