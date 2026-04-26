@@ -5,16 +5,20 @@ served from GitHub Releases.
 
 ## One-time setup
 
-### Tag protection (the security boundary)
+### Branch protection (the security boundary)
 
-Releases fire automatically on any `v*` tag push, so the only thing standing
-between a stolen write token and a signed, notarized release is a tag
-protection rule. Set one up before adding the secrets below:
+Every push to `main` cuts a release, so the gate against an attacker shipping a
+signed, notarized build is whoever can push to `main`. Configure a branch
+ruleset before adding the Apple/Sparkle secrets below:
 
-1. Repo settings → Rules → Rulesets → New tag ruleset.
-2. Target tags matching `v*`.
-3. Restrict tag creation, update, and deletion to repo admins (or a named
-   maintainer team).
+1. Repo settings → Rules → Rulesets → New branch ruleset.
+2. Target the `main` branch.
+3. Require pull requests, require at least one approving review, and
+   restrict who can push directly (admins only, ideally none).
+
+Tag protection isn't useful here — the workflow itself creates `v*` tags via
+`gh release create`, so a tag rule would either block CI or need a CI bypass
+that defeats its purpose. Branch protection on `main` is the real boundary.
 
 ### Release environment
 
@@ -59,27 +63,45 @@ will only accept updates signed by the matching private key.
 
 ## Release flow
 
-Create and push a version tag:
+Releases are continuous: every push to `main` runs the `Release` workflow.
+There is no separate cutting step. To ship, merge to `main`.
 
-```bash
-git tag v1.2.3
-git push origin v1.2.3
-```
+Versions follow CalVer in the form `YYYY.MM.MICRO` (e.g. `2026.04.0`,
+`2026.04.1`, …). The workflow computes the next tag itself by scanning for
+existing `v<year>.<month>.*` tags and bumping the trailing counter, so two
+releases in the same month auto-increment without anyone picking a number.
+The trailing counter resets to `0` on the first release of a new month.
 
-The `Release` workflow will:
+For each push the workflow will:
 
-1. Build `Flight.app`.
-2. Embed Sparkle and enable automatic update checks.
-3. Sign with the imported Developer ID certificate.
-4. Submit the zip to Apple notarization.
-5. Staple the notarization ticket.
-6. Generate a signed `appcast.xml`.
-7. Publish `Flight-<version>.zip` and `appcast.xml` to the GitHub Release.
+1. Compute the next CalVer tag.
+2. Build `Flight.app`.
+3. Embed Sparkle and enable automatic update checks.
+4. Sign with the imported Developer ID certificate.
+5. Submit the zip to Apple notarization.
+6. Staple the notarization ticket.
+7. Generate a signed `appcast.xml`.
+8. Create the GitHub Release (which also creates the `v…` tag) and upload
+   `Flight-<version>.zip` and `appcast.xml` as assets.
 
-You can also run the workflow manually with a version. For urgent releases, set
-`critical_update` to mark the Sparkle appcast item as critical. That is the
-strongest update pressure available through Sparkle; true silent forced
-deployment still requires MDM.
+Sparkle uses `CFBundleVersion` (set to the GitHub Actions run number, which is
+strictly monotonic per repo) to decide which build is newer, so the CalVer
+display string is purely cosmetic for ordering purposes — there's no risk of
+two releases tying.
+
+### Hotfixes and re-runs
+
+There is no manual trigger. To recover from a transient failure (notarization
+flake, Apple service blip), open the failed run in the Actions tab and click
+"Re-run jobs" — the workflow will recompute the next CalVer tag and ship the
+build at `main`'s current `HEAD`. To ship a code fix, merge it to `main` like
+any other change.
+
+### Skipping a release
+
+Every push to `main` releases. If you need to ship a docs-only change without
+a new build, edit `.github/workflows/release.yml` to add a `paths-ignore`
+filter (e.g. `**.md`, `doc/**`).
 
 ## Local builds
 

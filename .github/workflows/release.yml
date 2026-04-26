@@ -2,23 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release, without the leading v"
-        required: true
-        type: string
-      critical_update:
-        description: "Mark the Sparkle update as critical"
-        required: false
-        default: false
-        type: boolean
-      critical_update_from:
-        description: "Critical from this CFBundleVersion; leave empty for all older builds"
-        required: false
-        type: string
+    branches:
+      - main
 
 permissions: {}
 
@@ -57,19 +42,19 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            version="${GITHUB_REF_NAME#v}"
+          git fetch --tags --quiet
+          prefix="$(date -u +%Y).$(date -u +%m)."
+          last_tag="$(git tag -l "v${prefix}*" | sort -V | tail -n 1)"
+          if [ -z "$last_tag" ]; then
+            micro=0
           else
-            version="${{ inputs.version }}"
+            micro=$(( ${last_tag##*.} + 1 ))
           fi
-
-          if [ -z "$version" ]; then
-            echo "Release version is required." >&2
-            exit 1
-          fi
+          version="${prefix}${micro}"
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
 
       - name: Validate release configuration
         shell: bash
@@ -173,9 +158,6 @@ jobs:
 
       - name: Generate Sparkle appcast
         shell: bash
-        env:
-          CRITICAL_UPDATE: ${{ inputs.critical_update || 'false' }}
-          CRITICAL_UPDATE_FROM: ${{ inputs.critical_update_from }}
         run: |
           version="${{ steps.version.outputs.version }}"
           tag="${{ steps.version.outputs.tag }}"
@@ -191,19 +173,13 @@ jobs:
           cp "dist/Flight-$version.zip" "$appcast_dir/"
           printf 'See the GitHub release notes for Flight %s.\n' "$tag" > "$appcast_dir/Flight-$version.md"
 
-          appcast_options=(
-            --ed-key-file -
-            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/"
-            --maximum-deltas 0
-            -o "$appcast_dir/appcast.xml"
-          )
-
-          if [ "$CRITICAL_UPDATE" = "true" ]; then
-            appcast_options+=(--critical-update-version "$CRITICAL_UPDATE_FROM")
-          fi
-
           printf '%s' "$SPARKLE_PRIVATE_ED_KEY" |
-            "$sparkle_bin/generate_appcast" "${appcast_options[@]}" "$appcast_dir"
+            "$sparkle_bin/generate_appcast" \
+              --ed-key-file - \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/" \
+              --maximum-deltas 0 \
+              -o "$appcast_dir/appcast.xml" \
+              "$appcast_dir"
 
           cp "$appcast_dir/appcast.xml" dist/appcast.xml
 
@@ -214,16 +190,11 @@ jobs:
         run: |
           version="${{ steps.version.outputs.version }}"
           tag="${{ steps.version.outputs.tag }}"
-          archive="dist/Flight-$version.zip"
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$archive" dist/appcast.xml --clobber
-          else
-            gh release create "$tag" "$archive" dist/appcast.xml \
-              --target "$GITHUB_SHA" \
-              --title "Flight $tag" \
-              --generate-notes
-          fi
+          gh release create "$tag" "dist/Flight-$version.zip" dist/appcast.xml \
+            --target "$GITHUB_SHA" \
+            --title "Flight $tag" \
+            --generate-notes
 
       - name: Delete temporary keychain
         if: always()
