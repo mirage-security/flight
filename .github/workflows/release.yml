@@ -20,14 +20,17 @@ on:
         required: false
         type: string
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     name: Build, notarize, and publish
     runs-on: macos-15
     timeout-minutes: 30
+    environment: release
+
+    permissions:
+      contents: write
 
     env:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -42,9 +45,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Show Swift version
         run: swift --version

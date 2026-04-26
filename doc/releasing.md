@@ -5,8 +5,15 @@ served from GitHub Releases.
 
 ## One-time setup
 
+The `Release` workflow runs inside a GitHub Actions environment named
+`release`. Create that environment in repo settings → Environments and add
+yourself (or another Mirage maintainer) as a required reviewer. Scope the
+secrets below to the `release` environment so they are only readable by jobs
+that have been manually approved.
+
 Create a Developer ID Application certificate in the Apple Developer account,
-export it as a password-protected `.p12`, then add these GitHub Actions secrets:
+export it as a password-protected `.p12`, then add these GitHub Actions secrets
+to the `release` environment:
 
 | Secret | Purpose |
 |---|---|
