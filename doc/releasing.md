@@ -5,11 +5,25 @@ served from GitHub Releases.
 
 ## One-time setup
 
+### Tag protection (the security boundary)
+
+Releases fire automatically on any `v*` tag push, so the only thing standing
+between a stolen write token and a signed, notarized release is a tag
+protection rule. Set one up before adding the secrets below:
+
+1. Repo settings → Rules → Rulesets → New tag ruleset.
+2. Target tags matching `v*`.
+3. Restrict tag creation, update, and deletion to repo admins (or a named
+   maintainer team).
+
+### Release environment
+
 The `Release` workflow runs inside a GitHub Actions environment named
-`release`. Create that environment in repo settings → Environments and add
-yourself (or another Mirage maintainer) as a required reviewer. Scope the
-secrets below to the `release` environment so they are only readable by jobs
-that have been manually approved.
+`release`. Create that environment in repo settings → Environments — no
+reviewers needed; the environment exists so the secrets below are scoped to
+this one workflow rather than being readable by every workflow in the repo.
+
+### Apple and Sparkle credentials
 
 Create a Developer ID Application certificate in the Apple Developer account,
 export it as a password-protected `.p12`, then add these GitHub Actions secrets
