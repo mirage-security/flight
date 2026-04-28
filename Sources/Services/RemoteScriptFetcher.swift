@@ -52,6 +52,39 @@ enum RemoteScriptFetcher {
         }
     }
 
+    /// Re-fetches all lifecycle scripts from the forge API and updates the
+    /// cache. Returns `true` if any script's content changed compared to
+    /// what was previously cached (i.e. the remote repo has newer scripts).
+    /// Swallows network/API errors and returns `false` — a failed refresh
+    /// just means we keep using whatever's cached.
+    static func refreshAll(forge: ForgeConfig, projectName: String) async -> Bool {
+        guard let owner = forge.owner, let repo = forge.repo else { return false }
+        let dir = cacheDirectory(for: projectName)
+
+        var changed = false
+        for lifecycle in RemoteLifecycle.allCases {
+            do {
+                let content = try await fetchFile(
+                    forge: forge, owner: owner, repo: repo,
+                    path: ".flight/\(lifecycle.rawValue)"
+                )
+                let dest = dir.appendingPathComponent(lifecycle.rawValue)
+                let existing = try? String(contentsOf: dest, encoding: .utf8)
+                if existing != content {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    try content.write(to: dest, atomically: true, encoding: .utf8)
+                    try FileManager.default.setAttributes(
+                        [.posixPermissions: 0o755], ofItemAtPath: dest.path
+                    )
+                    changed = true
+                }
+            } catch {
+                // Optional scripts (list) or network failures — skip silently.
+            }
+        }
+        return changed
+    }
+
     /// Fetches a single file from the forge at HEAD. Uses the forge's
     /// native CLI/API surface (gh for GitHub, REST for Forgejo).
     private static func fetchFile(

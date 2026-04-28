@@ -74,6 +74,23 @@ public final class AppState {
             }
         }
 
+        // Refresh cached lifecycle scripts for remote-only projects so
+        // stale scripts don't silently diverge from what the repo ships.
+        Task {
+            for project in projects where project.isRemoteOnly {
+                guard let forge = project.forgeConfig else { continue }
+                let changed = await RemoteScriptFetcher.refreshAll(
+                    forge: forge, projectName: project.name
+                )
+                if changed {
+                    NotificationService.send(
+                        title: "Remote Scripts Updated",
+                        body: "\(project.name) — lifecycle scripts were out of date and have been refreshed."
+                    )
+                }
+            }
+        }
+
         // Fetch PR/CI status immediately so the bar isn't blank until the
         // 30s polling tick. Worktrees without a known prNumber get
         // `discoverPR`, which also scans the conversation history — that
