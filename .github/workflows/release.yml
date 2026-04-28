@@ -156,6 +156,24 @@ jobs:
           rm -f "$archive"
           /usr/bin/ditto -c -k --keepParent Flight.app "$archive"
 
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+          notes_file="$RUNNER_TEMP/Flight-$version.md"
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            --method POST \
+            -f tag_name="$tag" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq '.body // ""' > "$notes_file"
+
+          echo "file=$notes_file" >> "$GITHUB_OUTPUT"
+
       - name: Generate Sparkle appcast
         shell: bash
         run: |
@@ -171,12 +189,14 @@ jobs:
 
           mkdir -p "$appcast_dir"
           cp "dist/Flight-$version.zip" "$appcast_dir/"
-          printf 'See the GitHub release notes for Flight %s.\n' "$tag" > "$appcast_dir/Flight-$version.md"
+          cp "${{ steps.notes.outputs.file }}" "$appcast_dir/Flight-$version.md"
 
           printf '%s' "$SPARKLE_PRIVATE_ED_KEY" |
             "$sparkle_bin/generate_appcast" \
               --ed-key-file - \
               --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/" \
+              --embed-release-notes \
+              --full-release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases" \
               --maximum-deltas 0 \
               -o "$appcast_dir/appcast.xml" \
               "$appcast_dir"
@@ -194,7 +214,7 @@ jobs:
           gh release create "$tag" "dist/Flight-$version.zip" dist/appcast.xml \
             --target "$GITHUB_SHA" \
             --title "Flight $tag" \
-            --generate-notes
+            --notes-file "${{ steps.notes.outputs.file }}"
 
       - name: Delete temporary keychain
         if: always()

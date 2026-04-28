@@ -80,7 +80,7 @@ For each push the workflow will:
 4. Sign with the imported Developer ID certificate.
 5. Submit the zip to Apple notarization.
 6. Staple the notarization ticket.
-7. Generate a signed `appcast.xml`.
+7. Generate GitHub release notes and embed them in the signed `appcast.xml`.
 8. Create the GitHub Release (which also creates the `v…` tag) and upload
    `Flight-<version>.zip` and `appcast.xml` as assets.
 
