@@ -93,7 +93,9 @@ struct Base16Scheme: Codable {
     /// Cap HSL chroma (saturation × 2 × min(L, 1−L)) to `maxChroma`. Leaves
     /// already-muted foregrounds untouched (every built-in scheme's base05
     /// sits below 0.25), and pulls neon hexes toward a readable tint while
-    /// preserving hue and lightness.
+    /// preserving the brightest channel — so a near-peak color like
+    /// `#00ff9c` desaturates to a pastel that keeps contrast against a dark
+    /// background, instead of collapsing to mid-luminance gray.
     static func readableForeground(hex: String, maxChroma: Double = 0.25) -> Color {
         let clean = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         guard clean.count == 6, let val = UInt64(clean, radix: 16) else {
@@ -113,42 +115,17 @@ struct Base16Scheme: Codable {
         let chroma = s * 2 * Swift.min(l, 1 - l)
         if chroma <= maxChroma { return Color(red: r, green: g, blue: b) }
 
-        var h: Double
-        if cMax == r {
-            h = ((g - b) / d).truncatingRemainder(dividingBy: 6)
-        } else if cMax == g {
-            h = (b - r) / d + 2
-        } else {
-            h = (r - g) / d + 4
-        }
-        h /= 6
-        if h < 0 { h += 1 }
-
-        let denom = 2 * Swift.min(l, 1 - l)
-        let newS = denom > 0 ? maxChroma / denom : 0
-        let (nr, ng, nb) = Self.hslToRGB(h: h, s: newS, l: l)
-        return Color(red: nr, green: ng, blue: nb)
-    }
-
-    private static func hslToRGB(h: Double, s: Double, l: Double) -> (Double, Double, Double) {
-        if s == 0 { return (l, l, l) }
-        let q = l < 0.5 ? l * (1 + s) : l + s - l * s
-        let p = 2 * l - q
-        return (
-            hueToRGB(p: p, q: q, t: h + 1.0 / 3.0),
-            hueToRGB(p: p, q: q, t: h),
-            hueToRGB(p: p, q: q, t: h - 1.0 / 3.0)
+        // HSV desaturation: pull each channel toward the max channel by the
+        // fraction of chroma we're shedding. Keeps `V = max(r,g,b)` fixed,
+        // which preserves the original perceived luminance — unlike HSL
+        // desat at constant lightness, which dims peak-channel colors
+        // (e.g. #00ff9c) and tanks contrast on dark themes.
+        let scale = maxChroma / chroma
+        return Color(
+            red: cMax - (cMax - r) * scale,
+            green: cMax - (cMax - g) * scale,
+            blue: cMax - (cMax - b) * scale
         )
-    }
-
-    private static func hueToRGB(p: Double, q: Double, t: Double) -> Double {
-        var t = t
-        if t < 0 { t += 1 }
-        if t > 1 { t -= 1 }
-        if t < 1.0 / 6.0 { return p + (q - p) * 6 * t }
-        if t < 1.0 / 2.0 { return q }
-        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6 }
-        return p
     }
 
     // Built-in schemes
