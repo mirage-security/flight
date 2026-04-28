@@ -388,6 +388,19 @@ struct ChatMessageListView: View {
     /// simply grows at the bottom.
     @State private var firstShownIndex: Int? = nil
 
+    /// True when the viewport is within `nearBottomThreshold` of the
+    /// content's bottom edge. Drives "follow mode": streaming auto-scroll
+    /// only fires while the user is reading the tail. When they scroll up
+    /// to read history, this flips false and the floating jump-to-bottom
+    /// button appears. Tapping it snaps to the bottom and the geometry
+    /// observer re-engages follow mode.
+    @State private var isNearBottom: Bool = true
+
+    /// Pixels from the bottom edge that still count as "following". Picked
+    /// to absorb tiny trackpad nudges without breaking follow mode, while
+    /// being small enough that one deliberate scroll-up flips it.
+    private static let nearBottomThreshold: CGFloat = 80
+
     private var visibleSections: [ChatSection] {
         let s = sections
         let start = ChatSection.paginationStart(
@@ -459,6 +472,7 @@ struct ChatMessageListView: View {
         // the viewport draws empty until the user scrolls. Targeting an
         // explicit id materializes that cell and positions it correctly.
         ScrollViewReader { proxy in
+            ZStack(alignment: .bottomTrailing) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if showingSetupPlaceholder {
@@ -593,6 +607,14 @@ struct ChatMessageListView: View {
                 }
                 .padding()
             }
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                let distance = geo.contentSize.height
+                    - geo.contentOffset.y
+                    - geo.containerSize.height
+                return distance < Self.nearBottomThreshold
+            } action: { _, near in
+                isNearBottom = near
+            }
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
@@ -600,17 +622,20 @@ struct ChatMessageListView: View {
                 // Re-derive the visible window from the new conversation's
                 // length on the next render (last `initialVisibleCount`).
                 firstShownIndex = nil
+                isNearBottom = true
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: conversation?.messages.count ?? 0) { _, _ in
-                guard !isSearching else { return }
+                guard !isSearching, isNearBottom else { return }
                 scrollToBottom(proxy, animated: true)
             }
             .onChange(of: lastMessageLength) { _, _ in
-                guard !isSearching else { return }
+                guard !isSearching, isNearBottom else { return }
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: conversation?.pendingSend != nil) { _, _ in
+                // pendingSend is set by the user's own send action — always
+                // snap to bottom even if they were scrolled up.
                 guard !isSearching else { return }
                 scrollToBottom(proxy, animated: true)
             }
@@ -621,7 +646,32 @@ struct ChatMessageListView: View {
             .onChange(of: conversation?.currentSearchMatchIndex ?? 0) { _, _ in
                 scrollToCurrentMatch(proxy)
             }
+
+            if !isNearBottom {
+                jumpToBottomButton(proxy: proxy)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
+            }
+            .animation(.easeInOut(duration: 0.18), value: isNearBottom)
         }
+    }
+
+    private func jumpToBottomButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollToBottom(proxy, animated: true)
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.text)
+                .frame(width: 32, height: 32)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(theme.border, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+        .help("Jump to latest")
     }
 
     private var isSearching: Bool {
