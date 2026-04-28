@@ -33,9 +33,11 @@ struct ResolvedRemoteCommand {
 ///      committed to the repo.
 ///
 /// **Remote-only projects** (no local clone):
-///   - `~/flight/remote-scripts/<name>/<lifecycle>` — fetched from the
-///     repo's `.flight/` directory at project-add time. No settings
-///     overrides: the source of truth is whatever the repo ships.
+///   - `~/flight/remote-scripts/<name>/<lifecycle>` — cached from the
+///     repo's `.flight/` directory. The cache is refreshed in the
+///     background on app launch; if scripts change upstream, a
+///     notification alerts the user. No settings overrides: the source
+///     of truth is whatever the repo ships.
 ///
 /// All variants are invoked through `/bin/zsh -l -c` with this contract:
 ///
