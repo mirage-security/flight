@@ -36,10 +36,21 @@ struct MessageView: View, Equatable {
 
             Group {
                 if isUserMessage {
-                    Text(displayedAttributedString)
-                        .font(.system(size: fontSize))
-                        .foregroundStyle(theme.text)
-                        .textSelection(.enabled)
+                    // The AttributedString path exists for search-highlight;
+                    // when no search is active it allocates a fresh one each
+                    // body call for nothing. Plain Text avoids the allocation
+                    // and skips the SwiftUI _AppKitTextSelectionView witness
+                    // value-copy that showed up in the layout-pass stackshots.
+                    Group {
+                        if searchQuery.isEmpty {
+                            Text(message.textContent)
+                        } else {
+                            Text(displayedAttributedString)
+                        }
+                    }
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(theme.text)
+                    .textSelection(.enabled)
                 } else if hasMatches {
                     Text(displayedAttributedString)
                         .font(.system(size: fontSize))
