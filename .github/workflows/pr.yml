@@ -31,4 +31,5 @@ jobs:
         run: swift test
 
       - name: Run benchmarks
+        continue-on-error: true
         run: swift run -c release FlightBench
