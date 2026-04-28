@@ -12,12 +12,15 @@ enum ShellError: Error, LocalizedError {
 }
 
 enum ShellService {
-    /// Merges `overrides` into the current process environment. Used so
-    /// callers can inject `FLIGHT_*` vars without blowing away `PATH`, etc.
+    /// Merges `overrides` into a base environment whose PATH matches the
+    /// user's login shell. Without the EnvironmentService PATH override,
+    /// GUI-launched Flight inherits launchd's stripped PATH and can't find
+    /// `pnpm`, `claude`, or other tooling installed under `/opt/homebrew`
+    /// or `~/.local/bin`. Critical for `runScriptStreaming` since `zsh -s`
+    /// doesn't load rc files; harmless for `zsh -l` paths since they
+    /// re-derive PATH from rc files anyway.
     private static func mergedEnvironment(_ overrides: [String: String]) -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        for (key, value) in overrides { env[key] = value }
-        return env
+        EnvironmentService.baseEnvironment(overrides: overrides)
     }
 
     /// Builds the argv for `/bin/zsh` given a shell command string and
@@ -48,9 +51,7 @@ enum ShellService {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
 
-        if !environment.isEmpty {
-            process.environment = mergedEnvironment(environment)
-        }
+        process.environment = mergedEnvironment(environment)
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -101,9 +102,7 @@ enum ShellService {
             process.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
 
-        if !environment.isEmpty {
-            process.environment = mergedEnvironment(environment)
-        }
+        process.environment = mergedEnvironment(environment)
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -179,6 +178,10 @@ enum ShellService {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-s"]
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        // `zsh -s` does NOT load login/rc files, so without this PATH
+        // override the script can't find `pnpm`, `mise`, or anything else
+        // installed under /opt/homebrew or ~/.local/bin.
+        process.environment = mergedEnvironment([:])
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()

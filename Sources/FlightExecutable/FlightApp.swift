@@ -13,10 +13,21 @@ struct Flight: App {
     @State private var state = AppState()
 
     init() {
+        // Pre-warm the login-shell PATH capture before any agent/shell
+        // spawn so the first turn doesn't pay the ~50–200ms cost.
+        _ = EnvironmentService.path
+
         #if !DEBUG
         SentrySDK.start { options in
             options.dsn = "https://eaaab6f9b42c992322250844c6ee6c8f@o4506119898923008.ingest.us.sentry.io/4511293130211328"
             options.sendDefaultPii = true
+        }
+        SentryService.subprocessFailureHandler = { command, exitCode, correlationID in
+            SentrySDK.capture(message: "Subprocess '\(command)' exited \(exitCode)") { scope in
+                scope.setTag(value: command, key: "subprocess.command")
+                scope.setTag(value: String(exitCode), key: "subprocess.exit_code")
+                scope.setExtra(value: correlationID, key: "correlation_id")
+            }
         }
         #endif
 

@@ -6,7 +6,9 @@ final class ClaudeAgent {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
+    private var stderrPipe: Pipe?
     private var readTask: Task<Void, Never>?
+    private var stderrReadTask: Task<Void, Never>?
     private var logHandle: FileHandle?
     private var directory: String = ""
     private var logFile: URL?
@@ -128,14 +130,17 @@ final class ClaudeAgent {
     /// late-firing callback from flipping `isBusy` off on the *next* turn.
     private func teardownCurrentTurn() {
         readTask?.cancel()
+        stderrReadTask?.cancel()
         if let process, process.isRunning {
             process.terminationHandler = nil
             process.terminate()
         }
         readTask = nil
+        stderrReadTask = nil
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
+        stderrPipe = nil
     }
 
     // MARK: - Private
@@ -212,15 +217,14 @@ final class ClaudeAgent {
             if let cwd = remoteConnect.workingDirectory {
                 proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
             }
-            if !remoteConnect.environment.isEmpty {
-                var env = ProcessInfo.processInfo.environment
-                for (key, value) in remoteConnect.environment { env[key] = value }
-                proc.environment = env
-            }
+            proc.environment = EnvironmentService.baseEnvironment(overrides: remoteConnect.environment)
         } else {
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             proc.arguments = claudeArgs
             proc.currentDirectoryURL = URL(fileURLWithPath: directory)
+            // GUI launches inherit launchd's stripped PATH; without this
+            // override `/usr/bin/env claude` exits 127 on every turn.
+            proc.environment = EnvironmentService.baseEnvironment()
         }
 
         proc.standardInput = isRemote ? nil : stdin
@@ -230,11 +234,26 @@ final class ClaudeAgent {
         self.process = proc
         self.stdinPipe = stdin
         self.stdoutPipe = stdout
+        self.stderrPipe = stderr
 
         let busyCallback = self.onBusyChanged
-        proc.terminationHandler = { [weak self] _ in
+        proc.terminationHandler = { [weak self] proc in
+            let exitCode = proc.terminationStatus
+            let reason = proc.terminationReason
             Task { @MainActor in
                 if let self {
+                    // Capture clean non-zero exits (e.g. `/usr/bin/env`
+                    // returning 127 because `claude` isn't on PATH). Skip
+                    // .uncaughtSignal — that's user-pressed-stop (SIGINT)
+                    // or our own teardown (SIGTERM), neither is a bug.
+                    if reason == .exit && exitCode != 0 {
+                        self.log("=== Subprocess exited with status \(exitCode) ===")
+                        SentryService.captureSubprocessFailure(
+                            command: "claude",
+                            exitCode: exitCode,
+                            logFile: self.logFile
+                        )
+                    }
                     self.onTurnComplete()
                 } else {
                     // Agent was deallocated before process exited —
@@ -256,6 +275,7 @@ final class ClaudeAgent {
         turnStartDate = Date()
         onBusyChanged?(true)
         startReading()
+        startStderrReading()
 
         // Remote: message already passed as CLI arg, skip stdin
         if !isRemote, let stdinPipe = self.stdinPipe {
@@ -314,6 +334,42 @@ final class ClaudeAgent {
         guard let logHandle else { return }
         if let data = "\(line)\n".data(using: .utf8) {
             logHandle.write(data)
+        }
+    }
+
+    /// Drains the subprocess's stderr into the local log. Without this,
+    /// errors like `env: claude: No such file or directory` (the bug that
+    /// prompted this whole subsystem) sit in an undrained pipe and we
+    /// have no signal beyond "the agent stopped responding."
+    private func startStderrReading() {
+        guard let stderrPipe else { return }
+        let fileHandle = stderrPipe.fileHandleForReading
+
+        stderrReadTask = Task.detached { [weak self] in
+            var lineBuffer = Data()
+
+            while !Task.isCancelled {
+                let data = fileHandle.availableData
+                if data.isEmpty { break }
+
+                lineBuffer.append(data)
+
+                var batch: [String] = []
+                while let newlineIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                    let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
+                    lineBuffer = Data(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+                    if let line = String(data: Data(lineData), encoding: .utf8), !line.isEmpty {
+                        batch.append(line)
+                    }
+                }
+
+                if batch.isEmpty { continue }
+                let lines = batch
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    for line in lines { self.log("<<< STDERR: \(line)") }
+                }
+            }
         }
     }
 
