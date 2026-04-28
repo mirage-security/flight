@@ -7,8 +7,26 @@ DIST_DIR="dist"
 
 APP_VERSION="${FLIGHT_VERSION:-1.0.0}"
 BUILD_NUMBER="${FLIGHT_BUILD_NUMBER:-$APP_VERSION}"
-BUNDLE_ID="${FLIGHT_BUNDLE_ID:-ai.miragesecurity.flight}"
 MINIMUM_SYSTEM_VERSION="${FLIGHT_MINIMUM_SYSTEM_VERSION:-15.0}"
+
+if [ -n "${FLIGHT_BUNDLE_ID:-}" ]; then
+    BUNDLE_ID="$FLIGHT_BUNDLE_ID"
+    DISPLAY_NAME=""
+else
+    BRANCH=""
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    fi
+
+    if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+        BUNDLE_ID="ai.miragesecurity.flight.dev"
+        DISPLAY_NAME="Flight (dev)"
+    else
+        BRANCH_SLUG="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+        BUNDLE_ID="ai.miragesecurity.flight.dev.$BRANCH_SLUG"
+        DISPLAY_NAME="Flight ($BRANCH)"
+    fi
+fi
 
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
@@ -78,6 +96,10 @@ cat > "$INFO_PLIST" << EOF
 </dict>
 </plist>
 EOF
+
+if [ -n "$DISPLAY_NAME" ]; then
+    /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $DISPLAY_NAME" "$INFO_PLIST"
+fi
 
 if [ -n "$SPARKLE_FEED_URL" ] && [ -n "$SPARKLE_PUBLIC_ED_KEY" ]; then
     /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SPARKLE_FEED_URL" "$INFO_PLIST"
