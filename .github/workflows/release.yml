@@ -1,0 +1,201 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  release:
+    name: Build, notarize, and publish
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: release
+
+    permissions:
+      contents: write
+
+    env:
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      FLIGHT_BUNDLE_ID: ${{ vars.FLIGHT_BUNDLE_ID }}
+      SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
+      SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY || secrets.SPARKLE_PUBLIC_ED_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          git fetch --tags --quiet
+          prefix="$(date -u +%Y).$(date -u +%m)."
+          last_tag="$(git tag -l "v${prefix}*" | sort -V | tail -n 1)"
+          if [ -z "$last_tag" ]; then
+            micro=0
+          else
+            micro=$(( ${last_tag##*.} + 1 ))
+          fi
+          version="${prefix}${micro}"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          missing=()
+          required_env=(
+            APPLE_APP_SPECIFIC_PASSWORD
+            APPLE_DEVELOPER_ID_CERTIFICATE_BASE64
+            APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD
+            APPLE_ID
+            APPLE_TEAM_ID
+            SPARKLE_PRIVATE_ED_KEY
+            SPARKLE_PUBLIC_ED_KEY
+          )
+
+          for name in "${required_env[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing release configuration:\n' >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        id: signing
+        shell: bash
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id-application.p12"
+          keychain_path="$RUNNER_TEMP/flight-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+
+          signing_identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+            sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' |
+            head -n 1
+          )"
+
+          if [ -z "$signing_identity" ]; then
+            echo "No Developer ID Application signing identity found in imported certificate." >&2
+            exit 1
+          fi
+
+          echo "identity=$signing_identity" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed archive
+        id: build
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          feed_url="${SPARKLE_FEED_URL:-https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml}"
+          bundle_id="${FLIGHT_BUNDLE_ID:-ai.miragesecurity.flight}"
+
+          FLIGHT_VERSION="$version" \
+            FLIGHT_BUILD_NUMBER="$GITHUB_RUN_NUMBER" \
+            FLIGHT_BUNDLE_ID="$bundle_id" \
+            FLIGHT_CODESIGN_IDENTITY="${{ steps.signing.outputs.identity }}" \
+            SPARKLE_FEED_URL="$feed_url" \
+            SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
+            ./build.sh archive sign
+
+          echo "feed_url=$feed_url" >> "$GITHUB_OUTPUT"
+          echo "archive=dist/Flight-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize and staple archive
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          archive="dist/Flight-$version.zip"
+
+          xcrun notarytool submit "$archive" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+
+          xcrun stapler staple Flight.app
+          xcrun stapler validate Flight.app
+          codesign --verify --strict --deep --verbose=2 Flight.app
+          spctl --assess --type execute --verbose=2 Flight.app
+
+          rm -f "$archive"
+          /usr/bin/ditto -c -k --keepParent Flight.app "$archive"
+
+      - name: Generate Sparkle appcast
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+          appcast_dir="$RUNNER_TEMP/appcast"
+          sparkle_bin="$(dirname "$(find .build/artifacts/sparkle -type f -name generate_appcast | head -n 1)")"
+
+          if [ ! -x "$sparkle_bin/generate_appcast" ]; then
+            echo "Sparkle generate_appcast tool was not found." >&2
+            exit 1
+          fi
+
+          mkdir -p "$appcast_dir"
+          cp "dist/Flight-$version.zip" "$appcast_dir/"
+          printf 'See the GitHub release notes for Flight %s.\n' "$tag" > "$appcast_dir/Flight-$version.md"
+
+          printf '%s' "$SPARKLE_PRIVATE_ED_KEY" |
+            "$sparkle_bin/generate_appcast" \
+              --ed-key-file - \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/" \
+              --maximum-deltas 0 \
+              -o "$appcast_dir/appcast.xml" \
+              "$appcast_dir"
+
+          cp "$appcast_dir/appcast.xml" dist/appcast.xml
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+
+          gh release create "$tag" "dist/Flight-$version.zip" dist/appcast.xml \
+            --target "$GITHUB_SHA" \
+            --title "Flight $tag" \
+            --generate-notes
+
+      - name: Delete temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/flight-signing.keychain-db" || true

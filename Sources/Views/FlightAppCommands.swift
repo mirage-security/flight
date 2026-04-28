@@ -14,6 +14,10 @@ public struct FlightAppCommands: Commands {
     }
 
     public var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            CheckForUpdatesMenuItem(controller: .shared)
+        }
+
         // Cmd+N — New worktree (replaces default New Window)
         CommandGroup(replacing: .newItem) {
             Button("New Worktree") {

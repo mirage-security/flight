@@ -20,7 +20,7 @@ Built as an internal tool for daily agentic coding work. Open-sourced so others 
 
 ## Install
 
-Requires macOS 14+ and Swift 5.9+. No Xcode needed.
+Requires macOS 15+ and Swift 6.0+. No Xcode needed.
 
 ```bash
 git clone https://github.com/mirage-security/flight.git
@@ -34,6 +34,9 @@ Or run directly:
 ```bash
 swift run Flight
 ```
+
+Signed releases update themselves through Sparkle. The release workflow and
+required Apple/Sparkle credentials are documented in [doc/releasing.md](doc/releasing.md).
 
 ### Prerequisites
 

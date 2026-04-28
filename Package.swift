@@ -6,6 +6,7 @@ let package = Package(
     name: "Flight",
     platforms: [.macOS(.v15)],
     dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.1"),
         .package(url: "https://github.com/gonzalezreal/textual", from: "0.3.1"),
         .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.11.0"),
     ],
@@ -22,6 +23,7 @@ let package = Package(
             name: "FlightApp",
             dependencies: [
                 "FlightCore",
+                .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Textual", package: "textual"),
             ],
             path: "Sources",
