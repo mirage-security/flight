@@ -13,6 +13,11 @@ struct InputBarView: View {
     @Environment(\.theme) private var theme
     @State private var messageText = ""
     @State private var attachedImages: [ImageAttachment] = []
+    @State private var slashMenuItems: [SlashCommand] = []
+    @State private var slashMenuSelection: Int = 0
+    @State private var slashMenuKeyboardNonce: Int = 0
+    @State private var slashMenuDismissed: Bool = false
+    @State private var inputController = PasteableTextViewController()
 
     private var conversation: Conversation? {
         worktree.activeConversation
@@ -75,6 +80,21 @@ struct InputBarView: View {
                 }
             }
 
+            // Slash-command autocomplete sits between attachments and input
+            // so it grows the bar upward without overlapping anything.
+            if isSlashMenuVisible {
+                SlashCommandMenuView(
+                    commands: slashMenuItems,
+                    selectedIndex: slashMenuSelection,
+                    keyboardNonce: slashMenuKeyboardNonce,
+                    onSelect: { commitSlashCommand($0) },
+                    onHover: { slashMenuSelection = $0 }
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+                .transition(.opacity)
+            }
+
             // Input container: text area on top, controls row underneath.
             // Keeping the controls in a dedicated row (not overlaid) means a
             // growing message can never visually intersect them.
@@ -91,7 +111,12 @@ struct InputBarView: View {
                     },
                     onImagePaste: { image, data in
                         attachedImages.append(ImageAttachment(image: image, pngData: data))
-                    }
+                    },
+                    controller: inputController,
+                    menuActive: { isSlashMenuVisible },
+                    onMenuMove: { moveSlashSelection(by: $0) },
+                    onMenuCommit: { slashMenuCommitText() },
+                    onMenuCancel: { slashMenuDismissed = true }
                 )
                 .frame(minHeight: 40, maxHeight: 150)
 
@@ -124,6 +149,68 @@ struct InputBarView: View {
             .padding(.bottom, 8)
         }
         .background(theme.headerBackground)
+        .onChange(of: messageText) { _, _ in updateSlashMenu() }
+        .onAppear { updateSlashMenu() }
+    }
+
+    // MARK: - Slash command menu
+
+    /// Returns the query (chars after `/`) when the field is in
+    /// slash-command-entry mode, else nil. The mode is "field starts with
+    /// `/` and contains no whitespace" — typical chat-app autocomplete.
+    private var slashQuery: String? {
+        guard messageText.hasPrefix("/") else { return nil }
+        if messageText.contains(where: { $0.isWhitespace }) { return nil }
+        return String(messageText.dropFirst())
+    }
+
+    private var isSlashMenuVisible: Bool {
+        !slashMenuDismissed && slashQuery != nil && !slashMenuItems.isEmpty
+    }
+
+    private func updateSlashMenu() {
+        guard let query = slashQuery else {
+            slashMenuItems = []
+            slashMenuSelection = 0
+            slashMenuDismissed = false
+            return
+        }
+
+        let items: [SlashCommand]
+        if query.isEmpty {
+            items = SlashCommandHistory.shared.recentsThenAll()
+        } else {
+            items = SlashCommandFuzzy.filter(SlashCommandCatalog.all, query: query)
+        }
+
+        slashMenuItems = items
+        if slashMenuSelection >= items.count {
+            slashMenuSelection = max(0, items.count - 1)
+        }
+    }
+
+    private func moveSlashSelection(by delta: Int) {
+        guard !slashMenuItems.isEmpty else { return }
+        let count = slashMenuItems.count
+        slashMenuSelection = ((slashMenuSelection + delta) % count + count) % count
+        slashMenuKeyboardNonce &+= 1
+    }
+
+    private func slashMenuCommitText() -> String? {
+        guard isSlashMenuVisible,
+              slashMenuItems.indices.contains(slashMenuSelection) else { return nil }
+        return slashMenuItems[slashMenuSelection].trigger + " "
+    }
+
+    private func commitSlashCommand(_ command: SlashCommand) {
+        inputController.replaceAll(with: command.trigger + " ")
+    }
+
+    /// If `text` begins with a known slash command, returns it.
+    private func leadingSlashCommand(in text: String) -> SlashCommand? {
+        guard text.hasPrefix("/") else { return nil }
+        let token = text.dropFirst().split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+        return SlashCommandCatalog.command(named: token)
     }
 
     private var planModeButton: some View {
@@ -282,9 +369,28 @@ struct InputBarView: View {
         guard !text.isEmpty || !attachedImages.isEmpty else { return }
         guard let conversation else { return }
 
+        if let command = leadingSlashCommand(in: text) {
+            SlashCommandHistory.shared.record(command.name)
+        }
+
+        switch SlashCommandHandler.handle(text, conversation: conversation) {
+        case .handled:
+            messageText = ""
+            attachedImages.removeAll()
+            slashMenuDismissed = false
+            return
+        case .error(let message):
+            state.errorMessage = message
+            state.showingError = true
+            return
+        case .forward:
+            break
+        }
+
         let images = attachedImages.map { $0.pngData }
         messageText = ""
         attachedImages.removeAll()
+        slashMenuDismissed = false
 
         let message = text.isEmpty ? "What's in this image?" : text
 

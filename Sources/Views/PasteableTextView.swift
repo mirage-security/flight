@@ -1,6 +1,28 @@
 import SwiftUI
 import AppKit
 
+/// Imperative handle for actions a parent view needs to drive against the
+/// underlying NSTextView (e.g. replacing the field with a slash-command
+/// completion when the user clicks an item rather than pressing Return).
+@MainActor
+final class PasteableTextViewController {
+    weak var textView: NSTextView?
+
+    /// Replaces the field's full contents with `text` and parks the caret at
+    /// the end. Routes through `shouldChangeText`/`didChangeText` so the
+    /// delegate's `textDidChange` fires and the SwiftUI binding stays in
+    /// sync.
+    func replaceAll(with text: String) {
+        guard let tv = textView else { return }
+        let fullRange = NSRange(location: 0, length: (tv.string as NSString).length)
+        if tv.shouldChangeText(in: fullRange, replacementString: text) {
+            tv.replaceCharacters(in: fullRange, with: text)
+            tv.didChangeText()
+            tv.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        }
+    }
+}
+
 struct PasteableTextView: NSViewRepresentable {
     @Binding var text: String
     var font: NSFont
@@ -13,6 +35,20 @@ struct PasteableTextView: NSViewRepresentable {
     /// Cmd+Return fires `onReturn`. Cmd+Return fires `onReturn` in both
     /// modes.
     var sendOnReturn: Bool = true
+    /// Optional imperative controller. When non-nil, `makeNSView` wires the
+    /// underlying NSTextView into it so the parent can mutate the field
+    /// directly.
+    var controller: PasteableTextViewController? = nil
+    /// When `menuActive()` returns true, Up/Down/Tab/Return/Escape are
+    /// routed to the menu callbacks instead of the default behaviors.
+    var menuActive: () -> Bool = { false }
+    var onMenuMove: (Int) -> Void = { _ in }
+    /// Called when the user commits the menu selection (Return or Tab).
+    /// Returning a non-nil string replaces the entire field with that text
+    /// and moves the caret to the end. Returning nil falls through to the
+    /// default Return/Tab behavior.
+    var onMenuCommit: () -> String? = { nil }
+    var onMenuCancel: () -> Void = { }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -25,6 +61,11 @@ struct PasteableTextView: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onEscape = onEscape
         textView.sendOnReturn = sendOnReturn
+        textView.menuActive = menuActive
+        textView.onMenuMove = onMenuMove
+        textView.onMenuCommit = onMenuCommit
+        textView.onMenuCancel = onMenuCancel
+        controller?.textView = textView
         textView.font = font
         textView.textColor = textColor
         textView.backgroundColor = .clear
@@ -73,6 +114,11 @@ struct PasteableTextView: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onEscape = onEscape
         textView.sendOnReturn = sendOnReturn
+        textView.menuActive = menuActive
+        textView.onMenuMove = onMenuMove
+        textView.onMenuCommit = onMenuCommit
+        textView.onMenuCancel = onMenuCancel
+        controller?.textView = textView
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
@@ -96,6 +142,10 @@ final class ImagePasteTextView: NSTextView {
     var onReturn: (() -> Void)?
     var onEscape: (() -> Void)?
     var sendOnReturn: Bool = true
+    var menuActive: () -> Bool = { false }
+    var onMenuMove: (Int) -> Void = { _ in }
+    var onMenuCommit: () -> String? = { nil }
+    var onMenuCancel: () -> Void = { }
 
     override func paste(_ sender: Any?) {
         let pasteboard = NSPasteboard.general
@@ -119,8 +169,29 @@ final class ImagePasteTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36
+        let isEscape = event.keyCode == 53
+        let isUp = event.keyCode == 126
+        let isDown = event.keyCode == 125
+        let isTab = event.keyCode == 48
         let hasShift = event.modifierFlags.contains(.shift)
         let hasCommand = event.modifierFlags.contains(.command)
+
+        if menuActive() {
+            if isUp { onMenuMove(-1); return }
+            if isDown { onMenuMove(1); return }
+            if isEscape { onMenuCancel(); return }
+            if (isReturn && !hasShift) || (isTab && !hasShift) {
+                if let replacement = onMenuCommit() {
+                    let fullRange = NSRange(location: 0, length: (string as NSString).length)
+                    if shouldChangeText(in: fullRange, replacementString: replacement) {
+                        replaceCharacters(in: fullRange, with: replacement)
+                        didChangeText()
+                        setSelectedRange(NSRange(location: (replacement as NSString).length, length: 0))
+                    }
+                    return
+                }
+            }
+        }
 
         if isReturn && hasCommand {
             onReturn?()
@@ -131,7 +202,7 @@ final class ImagePasteTextView: NSTextView {
             return
         }
         // Escape = interrupt / dismiss
-        if event.keyCode == 53 {
+        if isEscape {
             onEscape?()
             return
         }
