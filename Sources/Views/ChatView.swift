@@ -412,6 +412,17 @@ struct ChatMessageListView: View {
         return Array(s[start...])
     }
 
+    /// ID of the most recent `.plan` section, or `nil` if the conversation
+    /// has none. PlanView uses this to default to expanded only for the
+    /// latest plan; older plans collapse so heavy conversations don't pay
+    /// the markdown-build cost for every plan on first materialization.
+    private var latestPlanSectionID: UUID? {
+        for section in sections.reversed() {
+            if case .plan = section { return section.id }
+        }
+        return nil
+    }
+
     private var lastSectionAbsorbsThinkingIndicator: Bool {
         guard let last = sections.last else { return false }
         switch last {
@@ -521,11 +532,6 @@ struct ChatMessageListView: View {
 
                     ForEach(snapshot) { section in
                         let isLast = section.id == lastID
-                        // Each rendered section bubbles its UUID up through
-                        // RenderedSectionIDsPreferenceKey. Production has no
-                        // observer (no-op); tests observe via .onPreferenceChange
-                        // to verify the realized set never escapes the
-                        // paginated window.
                         let sectionID = section.id
                         switch section {
                         case .message(let message):
@@ -537,44 +543,55 @@ struct ChatMessageListView: View {
                             )
                                 .equatable()
                                 .id(message.id)
-                                .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                .renderedSectionID(sectionID)
                         case .toolGroup(let groupID, let tools):
                             ToolGroupView(tools: tools, isActive: isLast && isThinking)
+                                .equatable()
                                 .id(groupID)
-                                .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                .renderedSectionID(sectionID)
                         case .thinkingGroup(let groupID, let thoughts):
                             ThinkingGroupView(thoughts: thoughts, isActive: isLast && isThinking)
+                                .equatable()
                                 .id(groupID)
-                                .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                .renderedSectionID(sectionID)
                         case .provisionGroup(let groupID, let logs):
                             ProvisionGroupView(
                                 logs: logs,
                                 isActive: isLast && worktree.status == .creating,
                                 kind: .remoteProvision
                             )
+                            .equatable()
                             .id(groupID)
-                            .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                            .renderedSectionID(sectionID)
                         case .setupGroup(let groupID, let logs):
                             ProvisionGroupView(
                                 logs: logs,
                                 isActive: isLast && worktree.status == .creating,
                                 kind: .worktreeSetup
                             )
+                            .equatable()
                             .id(groupID)
-                            .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                            .renderedSectionID(sectionID)
                         case .plan(let message):
-                            PlanView(message: message, state: state, worktree: worktree)
+                            PlanView(
+                                message: message,
+                                state: state,
+                                worktree: worktree,
+                                isLatestPlan: sectionID == latestPlanSectionID
+                            )
+                                .equatable()
                                 .id(message.id)
-                                .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                .renderedSectionID(sectionID)
                         case .system(let message):
                             if message.isPermissionRequest, let conversation {
                                 PermissionRequestView(message: message, conversation: conversation, state: state)
                                     .id(message.id)
-                                    .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                    .renderedSectionID(sectionID)
                             } else {
                                 SystemMessageView(message: message)
+                                    .equatable()
                                     .id(message.id)
-                                    .preference(key: RenderedSectionIDsPreferenceKey.self, value: [sectionID])
+                                    .renderedSectionID(sectionID)
                             }
                         }
                     }
@@ -1030,11 +1047,15 @@ struct PRStatusStripView: View {
 
 // MARK: - Tool Group (collapsed chain)
 
-struct ToolGroupView: View {
+struct ToolGroupView: View, Equatable {
     let tools: [AgentMessage]
     var isActive: Bool = false
     @Environment(\.theme) private var theme
     @State private var isExpanded = false
+
+    static func == (lhs: ToolGroupView, rhs: ToolGroupView) -> Bool {
+        lhs.isActive == rhs.isActive && lhs.tools == rhs.tools
+    }
 
     private var toolNames: String {
         let names = tools.compactMap { msg -> String? in
@@ -1148,11 +1169,15 @@ struct ToolGroupView: View {
 
 // MARK: - Thinking Group (collapsed chain-of-thought)
 
-struct ThinkingGroupView: View {
+struct ThinkingGroupView: View, Equatable {
     let thoughts: [AgentMessage]
     var isActive: Bool = false
     @Environment(\.theme) private var theme
     @State private var isExpanded = false
+
+    static func == (lhs: ThinkingGroupView, rhs: ThinkingGroupView) -> Bool {
+        lhs.isActive == rhs.isActive && lhs.thoughts == rhs.thoughts
+    }
 
     private var latestThought: AgentMessage? {
         thoughts.last
@@ -1264,7 +1289,7 @@ struct ThinkingGroupView: View {
 
 // MARK: - Provision Group (collapsed log output)
 
-enum ProvisionGroupKind {
+enum ProvisionGroupKind: Equatable {
     case remoteProvision
     case worktreeSetup
 
@@ -1290,12 +1315,16 @@ enum ProvisionGroupKind {
     }
 }
 
-struct ProvisionGroupView: View {
+struct ProvisionGroupView: View, Equatable {
     let logs: [AgentMessage]
     var isActive: Bool = false
     var kind: ProvisionGroupKind = .remoteProvision
     @Environment(\.theme) private var theme
     @State private var isExpanded = false
+
+    static func == (lhs: ProvisionGroupView, rhs: ProvisionGroupView) -> Bool {
+        lhs.isActive == rhs.isActive && lhs.kind == rhs.kind && lhs.logs == rhs.logs
+    }
 
     private var lastLine: String {
         logs.last?.textContent ?? ""
@@ -1371,10 +1400,16 @@ struct ProvisionGroupView: View {
 
 // MARK: - Plan View
 
-struct PlanView: View {
+struct PlanView: View, Equatable {
     let message: AgentMessage
     @Bindable var state: AppState
     let worktree: Worktree
+    /// True iff this is the most recent `.plan` section in the conversation.
+    /// Older plans collapse to a header by default — every realized plan
+    /// would otherwise build its full markdown tree on first layout, and
+    /// long conversations accumulate several of them. The user can still
+    /// expand any plan via the header chevron.
+    let isLatestPlan: Bool
     @AppStorage("flightFontSize") private var fontSize: Double = 14
     @Environment(\.theme) private var theme
 
@@ -1382,91 +1417,121 @@ struct PlanView: View {
     @State private var commentingOn: Int? = nil        // which item has comment field open
     @State private var hoveredItem: Int? = nil
     @State private var resolved = false
+    /// `nil` = follow the default (expanded iff latest); set by the user
+    /// clicking the header to override either way.
+    @State private var userExpansionOverride: Bool? = nil
+
+    /// Equality must include `isLatestPlan` so that when a new plan lands
+    /// in the conversation, the previously-latest plan re-renders and
+    /// auto-collapses (unless the user explicitly expanded it).
+    static func == (lhs: PlanView, rhs: PlanView) -> Bool {
+        lhs.message == rhs.message && lhs.isLatestPlan == rhs.isLatestPlan
+    }
 
     private var conversation: Conversation? {
         worktree.activeConversation
     }
 
     private var items: [PlanItem] {
-        guard let plan = message.planContent else { return [] }
-        return PlanItem.parse(plan)
+        PlanItemCache.items(for: message)
+    }
+
+    private var isExpanded: Bool {
+        userExpansionOverride ?? isLatestPlan
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 6) {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.purple)
-                Text("Plan")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.purple)
-                Spacer()
-                if resolved {
-                    Text("Approved")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(theme.green)
+            // Header — click to toggle expansion
+            Button {
+                userExpansionOverride = !isExpanded
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.purple.opacity(0.7))
+                        .frame(width: 12)
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.purple)
+                    Text("Plan")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.purple)
+                    if !isExpanded {
+                        Text("\(items.count) item\(items.count == 1 ? "" : "s")")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.secondaryText)
+                    }
+                    Spacer()
+                    if resolved {
+                        Text("Approved")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(theme.green)
+                    }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .buttonStyle(.plain)
 
-            Divider()
-                .overlay(theme.purple.opacity(0.2))
-
-            // Plan items
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    planItemRow(item: item, index: index)
-                }
-            }
-            .padding(.vertical, 4)
-
-            // Action buttons
-            if !resolved {
+            if isExpanded {
                 Divider()
                     .overlay(theme.purple.opacity(0.2))
 
-                HStack(spacing: 8) {
-                    Spacer()
+                // Plan items
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        planItemRow(item: item, index: index)
+                    }
+                }
+                .padding(.vertical, 4)
 
-                    let hasComments = !comments.values.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).isEmpty
+                // Action buttons
+                if !resolved {
+                    Divider()
+                        .overlay(theme.purple.opacity(0.2))
 
-                    if hasComments {
-                        Button { requestChanges() } label: {
+                    HStack(spacing: 8) {
+                        Spacer()
+
+                        let hasComments = !comments.values.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).isEmpty
+
+                        if hasComments {
+                            Button { requestChanges() } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bubble.left")
+                                        .font(.system(size: 10))
+                                    Text("Request Changes (\(activeCommentCount))")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(theme.orange.opacity(0.15))
+                                .foregroundStyle(theme.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button { approve() } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: "bubble.left")
-                                    .font(.system(size: 10))
-                                Text("Request Changes (\(activeCommentCount))")
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Approve Plan")
                                     .font(.system(size: 11, weight: .medium))
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(theme.orange.opacity(0.15))
-                            .foregroundStyle(theme.orange)
+                            .background(theme.green.opacity(0.15))
+                            .foregroundStyle(theme.green)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
                     }
-
-                    Button { approve() } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("Approve Plan")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(theme.green.opacity(0.15))
-                        .foregroundStyle(theme.green)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
             }
         }
         .background(theme.purple.opacity(0.06))
@@ -1576,6 +1641,27 @@ struct PlanView: View {
 
 // MARK: - Plan Item Parsing
 
+/// Caches `PlanItem.parse(message.planContent)` keyed by `AgentMessage.id`.
+/// Tool-input content is immutable per id, so a plan parses to the same
+/// items forever. `body` reads `items` on every SwiftUI invalidation —
+/// without this, big plans re-run the line scanner per streamed token.
+private enum PlanItemCache {
+    private final class Box { let items: [PlanItem]; init(_ items: [PlanItem]) { self.items = items } }
+    private static let cache: NSCache<NSUUID, Box> = {
+        let c = NSCache<NSUUID, Box>()
+        c.countLimit = 256
+        return c
+    }()
+
+    static func items(for message: AgentMessage) -> [PlanItem] {
+        let key = message.id as NSUUID
+        if let cached = cache.object(forKey: key) { return cached.items }
+        let parsed = message.planContent.map(PlanItem.parse) ?? []
+        cache.setObject(Box(parsed), forKey: key)
+        return parsed
+    }
+}
+
 struct PlanItem {
     let label: String  // "1.", "2.", "•", "-"
     let text: String
@@ -1654,9 +1740,13 @@ struct PlanItem {
 
 // MARK: - System Message (interrupts, workspace/session notes, etc.)
 
-struct SystemMessageView: View {
+struct SystemMessageView: View, Equatable {
     let message: AgentMessage
     @Environment(\.theme) private var theme
+
+    static func == (lhs: SystemMessageView, rhs: SystemMessageView) -> Bool {
+        lhs.message == rhs.message
+    }
 
     /// "Interrupted" is the one stop-style event that warrants red
     /// styling. Everything else flowing through `.system(.text(...))` is

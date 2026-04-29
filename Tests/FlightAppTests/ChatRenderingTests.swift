@@ -108,7 +108,17 @@ final class ChatRenderingTests: XCTestCase {
         return collector
     }
 
+    override func setUp() {
+        super.setUp()
+        // Production keeps the per-section preference modifier off (it
+        // breaks LazyVStack laziness on long conversations). The test relies
+        // on the bubbled IDs to verify what was realized, so opt back in
+        // for the lifetime of the test.
+        RenderedSectionIDsPreferenceKey.captureEnabled = true
+    }
+
     override func tearDown() {
+        RenderedSectionIDsPreferenceKey.captureEnabled = false
         window?.contentView = nil
         window = nil
         super.tearDown()

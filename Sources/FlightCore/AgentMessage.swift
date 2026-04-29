@@ -1,5 +1,20 @@
 import Foundation
 
+/// Holds an `Optional<String>` so `NSCache` (which requires `AnyObject`)
+/// can cache the "no plan" result alongside the parsed string. The id of an
+/// `AgentMessage` is immutable, and `planContent` only depends on `id`-keyed
+/// content, so a single computation is reusable forever.
+private final class CachedPlanContent {
+    let value: String?
+    init(_ value: String?) { self.value = value }
+}
+
+private let planContentCache: NSCache<NSUUID, CachedPlanContent> = {
+    let cache = NSCache<NSUUID, CachedPlanContent>()
+    cache.countLimit = 256
+    return cache
+}()
+
 public enum MessageRole: String, Codable {
     case user
     case assistant
@@ -83,7 +98,22 @@ public struct AgentMessage: Identifiable, Codable, Equatable {
         return false
     }
 
+    /// Parsed plan body extracted from the tool-input JSON, or `nil` if this
+    /// isn't a plan-bearing tool call. Cached by `id` because the JSON parse
+    /// is expensive (tool inputs can run 50KB+) and `PlanView.body` reads
+    /// this on every SwiftUI invalidation — once per streamed token under
+    /// load.
     public var planContent: String? {
+        let key = id as NSUUID
+        if let cached = planContentCache.object(forKey: key) {
+            return cached.value
+        }
+        let parsed = computePlanContent()
+        planContentCache.setObject(CachedPlanContent(parsed), forKey: key)
+        return parsed
+    }
+
+    private func computePlanContent() -> String? {
         guard case .toolUse(let name, let input) = content else { return nil }
         guard let data = input.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
