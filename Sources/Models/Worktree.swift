@@ -29,6 +29,12 @@ final class Worktree: Identifiable {
     var serviceMonitorError: String?
     var serviceMonitorUpdatedAt: Date?
 
+    // Panels (right-hand pane). Runtime-only — not persisted to
+    // WorktreeConfig. The runner is created lazily when the user opens
+    // the pane and torn down when it closes or the worktree changes.
+    var panelRunner: PanelRunner?
+    var panelPaneVisible: Bool = false
+
     // Remote mode
     var isRemote: Bool
     var workspaceName: String?

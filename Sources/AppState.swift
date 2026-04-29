@@ -467,6 +467,10 @@ public final class AppState {
             }
         }
 
+        worktree.panelRunner?.stop()
+        worktree.panelRunner = nil
+        worktree.panelPaneVisible = false
+
         for conv in worktree.conversations {
             FlightEventLog.delete(conversationID: conv.id)
         }
@@ -1148,6 +1152,52 @@ public final class AppState {
 
     func projectFor(worktree: Worktree) -> Project? {
         projects.first { $0.worktrees.contains { $0.id == worktree.id } }
+    }
+
+    // MARK: - Panels
+
+    /// First executable script in `<worktree>/.flight/panels/`, or `nil`.
+    /// Slice 1: local worktrees only — remote support comes later via
+    /// the same cache the remote-scripts subsystem uses.
+    func panelScriptPath(for worktree: Worktree) -> String? {
+        guard !worktree.isRemote, !worktree.path.isEmpty else { return nil }
+        return PanelDiscovery.firstPanel(in: worktree.path)
+    }
+
+    /// Open or close the right-hand panel pane for this worktree. Creates
+    /// the runner lazily on open and tears it down on close. No-op if no
+    /// panel script exists.
+    func togglePanelPane(for worktree: Worktree) {
+        if worktree.panelPaneVisible {
+            worktree.panelRunner?.stop()
+            worktree.panelRunner = nil
+            worktree.panelPaneVisible = false
+            return
+        }
+        guard let scriptPath = panelScriptPath(for: worktree) else { return }
+        let runner = PanelRunner(
+            scriptPath: scriptPath,
+            workingDirectory: worktree.path,
+            environment: panelEnvironment(for: worktree, scriptPath: scriptPath)
+        )
+        worktree.panelRunner = runner
+        worktree.panelPaneVisible = true
+        runner.start()
+    }
+
+    private func panelEnvironment(for worktree: Worktree, scriptPath: String) -> [String: String] {
+        var env: [String: String] = [
+            "FLIGHT_PANEL": PanelDiscovery.panelName(for: scriptPath),
+            "FLIGHT_BRANCH": worktree.branch,
+            "FLIGHT_WORKTREE_PATH": worktree.path,
+        ]
+        if let project = projectFor(worktree: worktree), let projectPath = project.path {
+            env["FLIGHT_PROJECT_PATH"] = projectPath
+        }
+        if let workspace = worktree.workspaceName {
+            env["FLIGHT_WORKSPACE"] = workspace
+        }
+        return env
     }
 
     private func projectForWorktree(_ worktree: Worktree) -> Project? {
