@@ -12,7 +12,7 @@ final class ClaudeAgent {
     private var logHandle: FileHandle?
     private var directory: String = ""
     private var logFile: URL?
-    private var pendingMessages: [String] = []
+    private var pendingMessages: [PendingTurn] = []
     /// When non-nil, the agent talks to a remote workspace by wrapping its
     /// per-turn invocation through this connect command (e.g. a
     /// `.flight/connect` script or a custom `coder ssh ...` template).
@@ -25,6 +25,19 @@ final class ClaudeAgent {
     var onMessages: (([AgentMessage]) -> Void)?
     var onSessionID: ((String) -> Void)?
     var onBusyChanged: ((Bool) -> Void)?
+
+    private struct PendingTurn {
+        let message: String
+        let images: [Data]
+        let planMode: Bool
+        let model: String?
+        let effort: String?
+    }
+
+    private enum StdinMode {
+        case none
+        case claudeStreamJSON
+    }
 
     func start(
         in directory: String,
@@ -64,7 +77,13 @@ final class ClaudeAgent {
         if isBusy {
             // Queue it — will fire when current turn completes
             log("=== QUEUED message (agent busy): \(message) ===")
-            pendingMessages.append(message)
+            pendingMessages.append(PendingTurn(
+                message: message,
+                images: images,
+                planMode: planMode,
+                model: model,
+                effort: effort
+            ))
             return
         }
 
@@ -160,6 +179,9 @@ final class ClaudeAgent {
         let stderr = Pipe()
 
         let isRemote = remoteConnect != nil
+        let stdinMode: StdinMode = isRemote ? .none : .claudeStreamJSON
+        let usesStreamJSONInput = stdinMode == .claudeStreamJSON
+        let writesToStdin = stdinMode != .none
 
         var claudeArgs = [
             "claude",
@@ -168,9 +190,17 @@ final class ClaudeAgent {
             "--verbose",
         ]
 
-        // Local: use stdin for input. Remote: pass message as prompt arg (stdin over SSH is unreliable)
-        if !isRemote {
+        if usesStreamJSONInput {
             claudeArgs += ["--input-format", "stream-json"]
+        }
+
+        // Local: use Claude Code's stream-json stdin protocol. Remote text
+        // turns keep the historical prompt-arg path because some SSH wrappers
+        // mishandle stdin. Remote image turns embed a base64 JSON payload in
+        // the remote command, decode it to temp PNG files, then prompt Claude
+        // with file paths; this avoids both stdin/TTY hangs and a Claude Code
+        // resume + stream-json input failure on remote sessions.
+        if !isRemote {
             claudeArgs += ["--allowedTools", "Write,Edit,Read,Glob,Grep,Agent,Task,ToolSearch,Skill,EnterPlanMode,ExitPlanMode,EnterWorktree,ExitWorktree,NotebookEdit,WebSearch,WebFetch,TodoWrite,AskUserQuestion,Bash(gh *),Bash(git *)"]
             claudeArgs += ["--permission-mode", planMode ? "plan" : "auto"]
             // Sandbox: filesystem scoped to cwd (worktree), network domains approved
@@ -201,17 +231,20 @@ final class ClaudeAgent {
         }
 
         if let remoteConnect {
-            // Write message as base64 to a temp file on remote, then cat it into claude's prompt.
-            // Format: claude -p "$(cat /tmp/...)" --flags...
-            // NOTE: this string is passed as a single positional arg to the
-            // connect wrapper — no outer shell re-parses it, so the $ / "
-            // characters are NOT escaped. The remote shell parses them.
-            let b64 = Data(message.utf8).base64EncodedString()
-            let flags = claudeArgs.dropFirst(2).joined(separator: " ") // drop "claude" and "-p"
-            let remoteCmd = "echo \(b64) | base64 -d > /tmp/flight-prompt.txt && claude -p \"$(cat /tmp/flight-prompt.txt)\" \(flags)"
+            let remoteCmd = Self.makeRemoteCommand(
+                message: message,
+                images: images,
+                claudeArgs: claudeArgs,
+                uploadsImages: !images.isEmpty
+            )
 
             log("=== REMOTE CONNECT: \(remoteConnect.command) ===")
-            log("=== REMOTE ARG: \(remoteCmd) ===")
+            if images.isEmpty {
+                log("=== REMOTE ARG: \(remoteCmd) ===")
+            } else {
+                let byteCount = images.reduce(0) { $0 + $1.count }
+                log("=== REMOTE ARG: <remote image upload command: \(images.count) image(s), \(byteCount) bytes> ===")
+            }
             proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
             proc.arguments = ["-l", "-c", remoteConnect.command, "_", remoteCmd]
             if let cwd = remoteConnect.workingDirectory {
@@ -227,12 +260,12 @@ final class ClaudeAgent {
             proc.environment = EnvironmentService.baseEnvironment()
         }
 
-        proc.standardInput = isRemote ? nil : stdin
+        proc.standardInput = writesToStdin ? stdin : nil
         proc.standardOutput = stdout
         proc.standardError = stderr
 
         self.process = proc
-        self.stdinPipe = stdin
+        self.stdinPipe = writesToStdin ? stdin : nil
         self.stdoutPipe = stdout
         self.stderrPipe = stderr
 
@@ -277,41 +310,16 @@ final class ClaudeAgent {
         startReading()
         startStderrReading()
 
-        // Remote: message already passed as CLI arg, skip stdin
-        if !isRemote, let stdinPipe = self.stdinPipe {
-            let content: Any
-            if images.isEmpty {
-                content = message
-            } else {
-                var blocks: [[String: Any]] = images.map { imageData in
-                    [
-                        "type": "image",
-                        "source": [
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": imageData.base64EncodedString()
-                        ]
-                    ]
-                }
-                blocks.append(["type": "text", "text": message])
-                content = blocks
-            }
-
-            let payload: [String: Any] = [
-                "type": "user",
-                "message": [
-                    "role": "user",
-                    "content": content
-                ]
-            ]
-
-            if let data = try? JSONSerialization.data(withJSONObject: payload),
-               var jsonString = String(data: data, encoding: .utf8) {
-                jsonString += "\n"
-                if let messageData = jsonString.data(using: .utf8) {
-                    log(">>> STDIN: \(jsonString.trimmingCharacters(in: .newlines))")
+        if let stdinPipe = self.stdinPipe {
+            switch stdinMode {
+            case .claudeStreamJSON:
+                if let jsonString = Self.makeStreamJSONInputLine(message: message, images: images),
+                   let messageData = jsonString.data(using: .utf8) {
+                    log(">>> STDIN: \(Self.redactedStreamJSONInputLine(jsonString))")
                     stdinPipe.fileHandleForWriting.write(messageData)
                 }
+            case .none:
+                break
             }
         }
     }
@@ -325,9 +333,155 @@ final class ClaudeAgent {
         // Process queued messages
         if !pendingMessages.isEmpty {
             let next = pendingMessages.removeFirst()
-            log("=== Dequeuing pending message: \(next) ===")
-            spawnTurn(message: next)
+            log("=== Dequeuing pending message: \(next.message) ===")
+            spawnTurn(
+                message: next.message,
+                images: next.images,
+                planMode: next.planMode,
+                model: next.model,
+                effort: next.effort
+            )
         }
+    }
+
+    static func makeStreamJSONInputLine(message: String, images: [Data]) -> String? {
+        let content: Any
+        if images.isEmpty {
+            content = message
+        } else {
+            var blocks: [[String: Any]] = images.map { imageData in
+                [
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": imageData.base64EncodedString()
+                    ]
+                ]
+            }
+            blocks.append(["type": "text", "text": message])
+            content = blocks
+        }
+
+        let payload: [String: Any] = [
+            "type": "user",
+            "message": [
+                "role": "user",
+                "content": content
+            ]
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return jsonString + "\n"
+    }
+
+    static func makeRemoteCommand(
+        message: String,
+        images: [Data] = [],
+        claudeArgs: [String],
+        uploadsImages: Bool
+    ) -> String {
+        let flags = shellJoin(claudeArgs.dropFirst(2)) // drop "claude" and "-p"
+        if uploadsImages {
+            let payloadB64 = makeRemoteAttachmentUploadPayload(message: message, images: images)
+            let script = """
+            import base64, json, os, re, sys
+            payload = json.loads(base64.b64decode(sys.argv[2]).decode("utf-8"))
+            out_dir = sys.argv[1]
+            os.makedirs(out_dir, exist_ok=True)
+            paths = []
+            for index, image in enumerate(payload.get("images", []), 1):
+                raw_name = image.get("filename") or ("image-%d.png" % index)
+                name = re.sub(r"[^A-Za-z0-9._-]", "_", raw_name)
+                path = os.path.join(out_dir, name)
+                with open(path, "wb") as handle:
+                    handle.write(base64.b64decode(image["data"]))
+                paths.append(path)
+            message = payload.get("message") or "What's in this image?"
+            if paths:
+                lines = "\\n".join("%d. %s" % (i, path) for i, path in enumerate(paths, 1))
+                prompt = "%s\\n\\nAttached image file(s):\\n%s\\n\\nUse the Read tool to inspect the attached image file(s) before answering any image-specific question." % (message, lines)
+            else:
+                prompt = message
+            prompt_path = os.path.join(out_dir, "prompt.txt")
+            with open(prompt_path, "w", encoding="utf-8") as handle:
+                handle.write(prompt)
+            print(prompt_path)
+            """
+            return """
+            flight_dir="${TMPDIR:-/tmp}/flight-attachments-$(date +%s)-$$"; mkdir -p "$flight_dir"; prompt_file=$(python3 -c \(shellQuote(script)) "$flight_dir" \(shellQuote(payloadB64))) || exit $?; claude -p "$(cat "$prompt_file")" \(flags); status=$?; rm -rf "$flight_dir"; exit $status
+            """
+        }
+
+        // Write message as base64 to a temp file on remote, then cat it into
+        // claude's prompt. This command is passed as a single positional arg
+        // to the connect wrapper; the remote shell does the command parsing.
+        let b64 = Data(message.utf8).base64EncodedString()
+        return "printf %s \(shellQuote(b64)) | base64 -d > /tmp/flight-prompt.txt && claude -p \"$(cat /tmp/flight-prompt.txt)\" \(flags)"
+    }
+
+    static func makeRemoteAttachmentUploadLine(message: String, images: [Data]) -> String? {
+        let imagePayloads: [[String: Any]] = images.enumerated().map { index, data in
+            [
+                "filename": "image-\(index + 1).png",
+                "media_type": "image/png",
+                "data": data.base64EncodedString()
+            ]
+        }
+        let payload: [String: Any] = [
+            "message": message,
+            "images": imagePayloads
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return jsonString + "\n"
+    }
+
+    private static func makeRemoteAttachmentUploadPayload(message: String, images: [Data]) -> String {
+        guard let jsonString = makeRemoteAttachmentUploadLine(message: message, images: images) else {
+            return ""
+        }
+        return Data(jsonString.utf8).base64EncodedString()
+    }
+
+    private static func shellJoin<S: Sequence>(_ values: S) -> String where S.Element == String {
+        values.map(shellQuote).joined(separator: " ")
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func redactedStreamJSONInputLine(_ line: String) -> String {
+        let data = Data(line.utf8)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = obj["message"] as? [String: Any],
+              var content = message["content"] as? [[String: Any]] else {
+            return line.trimmingCharacters(in: .newlines)
+        }
+
+        for index in content.indices where content[index]["type"] as? String == "image" {
+            guard var source = content[index]["source"] as? [String: Any] else { continue }
+            let original = source["data"] as? String ?? ""
+            source["data"] = "<base64 image: \(original.count) chars>"
+            content[index]["source"] = source
+        }
+
+        var redactedMessage = message
+        redactedMessage["content"] = content
+        var redactedObj = obj
+        redactedObj["message"] = redactedMessage
+
+        guard let redactedData = try? JSONSerialization.data(withJSONObject: redactedObj),
+              let redacted = String(data: redactedData, encoding: .utf8) else {
+            return line.trimmingCharacters(in: .newlines)
+        }
+        return redacted
     }
 
     private func log(_ line: String) {
