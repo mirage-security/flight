@@ -7,6 +7,9 @@ private let ciLog = Logger(subsystem: "flight", category: "checkCI")
 
 @Observable
 public final class AppState {
+    private static let serviceMonitorTimeoutSeconds: UInt64 = 8
+    private static let serviceMonitorTimeoutNanoseconds = serviceMonitorTimeoutSeconds * 1_000_000_000
+
     var projects: [Project] = []
     var selectedProjectID: String?
     var selectedWorktreeID: String?
@@ -176,9 +179,10 @@ public final class AppState {
     /// Adds a project with no local clone. Fetches the repo's committed
     /// `.flight/` scripts via the forge API and caches them under
     /// `~/flight/remote-scripts/<name>/` — those are what Flight runs to
-    /// provision/connect/teardown remote workspaces. Throws if the fetch
-    /// fails (e.g. missing scripts, auth, network) so the user gets
-    /// immediate feedback rather than a confusing failure later.
+    /// provision/connect remote workspaces. Optional lifecycle scripts are
+    /// cached when present. Throws if required fetches fail (e.g. missing
+    /// scripts, auth, network) so the user gets immediate feedback rather
+    /// than a confusing failure later.
     func addRemoteOnlyProject(name: String, forge: ForgeConfig) async throws {
         guard !projects.contains(where: { $0.name == name }) else {
             throw ForgeError.apiError("A project named \(name) already exists.")
@@ -695,6 +699,87 @@ public final class AppState {
         // (flight or claude) strictly before the latest marker.
         FlightEventLog.append(.clear(), conversationID: conversation.id)
         conversation.clearMessages()
+    }
+
+    // MARK: - Service Monitor
+
+    @MainActor
+    func refreshServiceMonitor(for worktree: Worktree) async {
+        guard !worktree.serviceMonitorLoading else { return }
+
+        worktree.serviceMonitorVisible = true
+        worktree.serviceMonitorLoading = true
+        worktree.serviceMonitorError = nil
+        defer { worktree.serviceMonitorLoading = false }
+
+        do {
+            guard let project = projectForWorktree(worktree),
+                  let resolved = RemoteScriptsService.resolve(
+                    .monitor,
+                    project: project,
+                    workspace: worktree.workspaceName
+                  ) else {
+                throw ServiceMonitorError.unavailable
+            }
+
+            let output = try await runServiceMonitorCommand(resolved)
+
+            worktree.serviceMonitorItems = try ServiceMonitor.parse(output)
+            worktree.serviceMonitorError = nil
+            worktree.serviceMonitorUpdatedAt = Date()
+        } catch {
+            worktree.serviceMonitorItems = []
+            worktree.serviceMonitorError = serviceMonitorErrorMessage(error)
+            worktree.serviceMonitorUpdatedAt = Date()
+        }
+    }
+
+    private enum ServiceMonitorError: LocalizedError {
+        case unavailable
+        case timedOut(seconds: UInt64)
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable:
+                return "No monitor script configured. Add .flight/monitor to this project."
+            case .timedOut(let seconds):
+                return "Monitor script did not finish within \(seconds)s."
+            }
+        }
+    }
+
+    private func runServiceMonitorCommand(_ resolved: ResolvedRemoteCommand) async throws -> String {
+        try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await ShellService.runStreaming(
+                    resolved.command,
+                    in: resolved.workingDirectory,
+                    environment: resolved.environment,
+                    onLine: { _ in }
+                )
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.serviceMonitorTimeoutNanoseconds)
+                throw ServiceMonitorError.timedOut(seconds: Self.serviceMonitorTimeoutSeconds)
+            }
+
+            guard let output = try await group.next() else {
+                throw CancellationError()
+            }
+            group.cancelAll()
+            return output
+        }
+    }
+
+    private func serviceMonitorErrorMessage(_ error: Error) -> String {
+        if let shellError = error as? ShellError {
+            switch shellError {
+            case .failed(_, let exitCode, let stderr):
+                let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                return detail.isEmpty ? "Monitor script failed with exit \(exitCode)." : detail
+            }
+        }
+        return error.localizedDescription
     }
 
     // MARK: - Forge Integration (PRs, CI)

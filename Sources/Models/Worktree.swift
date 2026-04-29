@@ -23,6 +23,11 @@ final class Worktree: Identifiable {
     var prStatus: PRStatus?
     var ciLogsPaths: [String: String] = [:]  // check name -> log file path
     var ciLogsFetching = false
+    var serviceMonitorVisible = false
+    var serviceMonitorItems: [ServiceMonitorStatus] = []
+    var serviceMonitorLoading = false
+    var serviceMonitorError: String?
+    var serviceMonitorUpdatedAt: Date?
 
     // Remote mode
     var isRemote: Bool

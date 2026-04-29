@@ -14,6 +14,7 @@ public struct SettingsView: View {
     @State private var connect: String = ""
     @State private var teardown: String = ""
     @State private var list: String = ""
+    @State private var monitor: String = ""
 
     @State private var worktreeProjectID: String?
     @State private var setupScript: String = ""
@@ -33,7 +34,7 @@ public struct SettingsView: View {
             remoteTab
                 .tabItem { Label("Remote", systemImage: "cloud") }
         }
-        .frame(width: 500, height: 480)
+        .frame(width: 500, height: 540)
         .onAppear {
             themeNames = ThemeManager.shared.availableThemeNames()
         }
@@ -175,22 +176,24 @@ public struct SettingsView: View {
         if let remote = selectedRemoteProject?.remoteMode {
             provision = remote.provision
             connect = remote.connect
-            teardown = remote.teardown
+            teardown = remote.teardown ?? ""
             list = remote.list ?? ""
+            monitor = remote.monitor ?? ""
         } else {
             provision = ""
             connect = ""
             teardown = ""
             list = ""
+            monitor = ""
         }
     }
 
     private var remoteAllEmpty: Bool {
-        provision.isEmpty && connect.isEmpty && teardown.isEmpty && list.isEmpty
+        provision.isEmpty && connect.isEmpty && teardown.isEmpty && list.isEmpty && monitor.isEmpty
     }
 
     private var remoteRequiredFilled: Bool {
-        !provision.isEmpty && !connect.isEmpty && !teardown.isEmpty
+        !provision.isEmpty && !connect.isEmpty
     }
 
     private func remoteFieldEditor(
@@ -239,10 +242,11 @@ public struct SettingsView: View {
             Section {
                 remoteFieldEditor(title: "Provision", lifecycle: .provision, text: $provision)
                 remoteFieldEditor(title: "Connect", lifecycle: .connect, text: $connect)
-                remoteFieldEditor(title: "Teardown", lifecycle: .teardown, text: $teardown)
+                remoteFieldEditor(title: "Teardown (optional)", lifecycle: .teardown, text: $teardown)
                 remoteFieldEditor(title: "List (optional)", lifecycle: .list, text: $list)
+                remoteFieldEditor(title: "Monitor (optional)", lifecycle: .monitor, text: $monitor)
             } footer: {
-                Text("Each command runs via zsh with these env vars: provision sees $FLIGHT_BRANCH and prints the workspace name on its last stdout line. connect is a wrapper that runs \"$@\" on the workspace (Flight appends the remote command). connect/teardown see $FLIGHT_WORKSPACE. list prints one workspace name per line. Empty fields fall back to .flight/<name> scripts in the repo.")
+                Text("Each command runs via zsh with these env vars: provision sees $FLIGHT_BRANCH and prints the workspace name on its last stdout line. connect is a wrapper that runs \"$@\" on the workspace (Flight appends the remote command). connect/teardown/monitor see $FLIGHT_WORKSPACE. list prints one workspace name per line. monitor prints JSON for the Services rail. Empty fields fall back to .flight/<name> scripts in the repo.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -257,8 +261,9 @@ public struct SettingsView: View {
                         state.updateRemoteMode(RemoteModeConfig(
                             provision: provision,
                             connect: connect,
-                            teardown: teardown,
-                            list: list.isEmpty ? nil : list
+                            teardown: teardown.isEmpty ? nil : teardown,
+                            list: list.isEmpty ? nil : list,
+                            monitor: monitor.isEmpty ? nil : monitor
                         ), for: project)
                     }
                 }

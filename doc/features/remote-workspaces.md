@@ -47,13 +47,13 @@ Remote mode has two sources, with settings taking precedence over on-disk script
 1. **`.flight/<lifecycle>` in the repo** — executable shell script, committed to the repo so the whole team uses the same provisioning flow. This is the intended default.
 2. **`project.remoteMode.<lifecycle>` in `~/flight/config.json`** — shell command string, configurable via Settings > Remote. Overrides the on-disk script for local iteration or per-machine overrides.
 
-Any lifecycle with no script and no settings entry is considered unset. Provision and connect are required for remote mode to work; teardown and list are optional.
+Any lifecycle with no script and no settings entry is considered unset. Provision and connect are required for remote mode to work; teardown, list, and monitor are optional.
 
 Different projects can use different infra (Coder, EC2 via raw SSH, a GPU cluster, etc.) or have no remote mode at all — the scripts are the abstraction layer.
 
 ## Lifecycle scripts
 
-All four lifecycle commands run via `zsh -l -c` with `cwd` set to the repo root. Each gets a specific environment and argv contract:
+Lifecycle commands run via `zsh -l -c` with `cwd` set to the repo root. Each gets a specific environment and argv contract:
 
 ### `provision`
 
@@ -78,7 +78,7 @@ exec coder ssh "${FLIGHT_WORKSPACE:?}" -- "$@"
 
 Flight calls this every turn to run a `claude -p …` invocation remotely.
 
-### `teardown`
+### `teardown` optional
 
 **Env:** `FLIGHT_WORKSPACE`.
 
@@ -89,6 +89,34 @@ Flight calls this every turn to run a `claude -p …` invocation remotely.
 **Env:** none.
 
 **Contract:** print one running workspace name per line. Populates the "attach to existing" chips in the remote prompt sheet. Empty output is fine.
+
+### `monitor`
+
+**Env:** `FLIGHT_WORKSPACE` for remote worktrees.
+
+**Contract:** print JSON for the Services rail, exit quickly, and avoid long-running tails or watch modes. Flight times out monitor refreshes after 8 seconds. The payload may be an array of services or an object with a `services` array. Each service has `name`, optional `status`, optional `health` (`healthy`, `warning`, or `critical`), and optional `metrics`.
+
+Example `.flight/monitor`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Replace this with your process supervisor, orchestrator, or health endpoint.
+cat <<'JSON'
+[
+  {
+    "name": "web",
+    "status": "online",
+    "health": "healthy",
+    "metrics": [
+      { "label": "uptime", "value": "2d 0h" },
+      { "label": "restarts", "value": "0" }
+    ]
+  }
+]
+JSON
+```
 
 ## `FLIGHT_OUTPUT` metadata protocol
 
@@ -131,7 +159,7 @@ This lets you run multiple independent Claude sessions on the same machine witho
 1. Stop the agent(s), delete chat history.
 2. Check if any other worktrees share the same `workspaceName`.
 3. If yes → just remove the worktree entry (workspace stays running).
-4. If no → run `teardown`. On success, silently drop the worktree from Flight. On failure, surface the error and still drop the worktree — the assumption being "the user can always clean up on the host side, but Flight getting stuck is unrecoverable."
+4. If no → run `teardown` when configured. On success or when no teardown script exists, silently drop the worktree from Flight. On failure, surface the error and still drop the worktree — the assumption being "the user can always clean up on the host side, but Flight getting stuck is unrecoverable."
 
 ## UI
 

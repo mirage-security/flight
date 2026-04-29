@@ -17,8 +17,8 @@ enum RemoteScriptFetcher {
 
     /// Downloads each lifecycle script from the repo specified by `forge`
     /// into the project's cache dir. Throws if required scripts are
-    /// missing or unreadable. `list` is optional and silently skipped if
-    /// the repo doesn't have one.
+    /// missing or unreadable. Optional scripts are silently skipped if the
+    /// repo doesn't have them.
     static func fetchAll(forge: ForgeConfig, projectName: String) async throws {
         guard let owner = forge.owner, let repo = forge.repo else {
             throw ForgeError.apiError("Forge config missing owner/repo")
@@ -27,7 +27,7 @@ enum RemoteScriptFetcher {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         for lifecycle in RemoteLifecycle.allCases {
-            let required = lifecycle != .list
+            let required = lifecycle.isRequiredForRemoteOnlyFetch
             do {
                 let content = try await fetchFile(
                     forge: forge,
@@ -47,7 +47,7 @@ enum RemoteScriptFetcher {
                         "Couldn't fetch .flight/\(lifecycle.rawValue) from \(owner)/\(repo): \(error.localizedDescription)"
                     )
                 }
-                // Optional lifecycle (list) — silently ignore
+                // Optional lifecycle — silently ignore
             }
         }
     }

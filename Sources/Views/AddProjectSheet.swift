@@ -4,7 +4,7 @@ import SwiftUI
 ///  - **Local**: pick a git repo directory on disk (existing flow).
 ///  - **Remote-only**: point at a forge repo (GitHub / Forgejo). Flight
 ///    downloads the repo's committed `.flight/` scripts into a local
-///    cache and uses those for provision/connect/teardown. No overrides.
+///    cache and uses those for remote lifecycle commands. No overrides.
 struct AddProjectSheet: View {
     @Bindable var state: AppState
     @Environment(\.theme) private var theme

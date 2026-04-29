@@ -5,13 +5,14 @@ import FlightCore
 /// repo. Each field is a shell command string (not a template — no
 /// placeholder substitution). Commands run via `zsh -l -c` with env
 /// vars set: `FLIGHT_BRANCH` for provision, `FLIGHT_WORKSPACE` for
-/// connect/teardown. Connect additionally receives the remote command
+/// connect/teardown/monitor. Connect additionally receives the remote command
 /// as `"$@"`.
 struct RemoteModeConfig: Codable {
     var provision: String
     var connect: String
-    var teardown: String
+    var teardown: String?
     var list: String?
+    var monitor: String?
 }
 
 struct FlightConfig: Codable {

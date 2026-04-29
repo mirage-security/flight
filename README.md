@@ -66,14 +66,15 @@ Click **Add Project** in the sidebar. The sheet has two modes:
 3. Pick "New" to provision a fresh workspace, or an existing one from the list
 4. Type your initial prompt and hit **Cmd+Enter**
 
-Remote mode is backend-agnostic. You provide four scripts in `.flight/` at the repo root:
+Remote mode is backend-agnostic. You provide lifecycle scripts in `.flight/` at the repo root:
 
 | Script | Env | Args | Purpose |
 |---|---|---|---|
 | `.flight/provision` | `FLIGHT_BRANCH` | — | Create a workspace. Prints workspace name as last line of stdout. Can emit `FLIGHT_OUTPUT: key=value` metadata (see below). |
 | `.flight/connect` | `FLIGHT_WORKSPACE` | `"$@"` | SSH wrapper. Runs its argv on the remote workspace. e.g. `exec coder ssh "$FLIGHT_WORKSPACE" -- "$@"` |
-| `.flight/teardown` | `FLIGHT_WORKSPACE` | — | Destroy the workspace. |
+| `.flight/teardown` | `FLIGHT_WORKSPACE` | — | Optional. Destroy the workspace. |
 | `.flight/list` | — | — | Optional. Prints running workspace names, one per line. Populates the "attach to existing" picker. |
+| `.flight/monitor` | `FLIGHT_WORKSPACE` | — | Optional. Prints JSON consumed by the Services rail. |
 
 Scripts run via `zsh -l -c` with cwd at the repo root. Each can also be set as a settings-level template (`Settings > Remote`) which overrides the on-disk script for local iteration.
 
@@ -112,7 +113,7 @@ A remote-only project has no local clone. You point Flight at a forge repo (GitH
 1. Click **Add Project** in the sidebar and switch to the **Remote** tab
 2. Pick a forge type and enter the repo as `owner/name`, `github.com/owner/name`, or a full URL
 3. (Forgejo only) provide the base URL and the env var that holds your API token
-4. Hit **Add**. Flight fetches `.flight/provision`, `.flight/connect`, `.flight/teardown`, and (if present) `.flight/list` via `gh api repos/<owner>/<repo>/contents/.flight/<script>` (GitHub) or the Forgejo raw endpoint, caches them under `~/flight/remote-scripts/<name>/`, and adds the project
+4. Hit **Add**. Flight fetches `.flight/provision`, `.flight/connect`, and optional lifecycle scripts like `.flight/teardown`, `.flight/list`, and `.flight/monitor` via `gh api repos/<owner>/<repo>/contents/.flight/<script>` (GitHub) or the Forgejo raw endpoint, caches them under `~/flight/remote-scripts/<name>/`, and adds the project
 5. Use **Cmd+Shift+N** to spin up workspaces as normal — there's no Cmd+N flow because there's no local clone to cut worktrees from
 
 Settings-level overrides (**Settings > Remote**) are ignored for remote-only projects. The repo is the source of truth; if you change a script, push to the default branch and re-add the project.
@@ -132,6 +133,34 @@ Provision scripts can emit `FLIGHT_OUTPUT: key=value` lines anywhere in their st
 | `repo_path` | Path to the repo checkout on the remote workspace. Used by VS Code Remote-SSH to open the right folder. |
 
 Unknown keys are ignored, so the contract is forward-compatible.
+
+### Service monitor
+
+If a project provides `.flight/monitor`, Flight shows a Services rail from the chat header. The script should print JSON only, exit quickly, and avoid long-running tails or watch modes. Flight times out monitor refreshes after 8 seconds. The payload may be either an array of services or an object with a `services` array.
+
+Example `.flight/monitor`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Replace this with your process supervisor, orchestrator, or health endpoint.
+cat <<'JSON'
+[
+  {
+    "name": "web",
+    "status": "online",
+    "health": "healthy",
+    "metrics": [
+      { "label": "uptime", "value": "2d 0h" },
+      { "label": "restarts", "value": "0" }
+    ]
+  }
+]
+JSON
+```
+
+`health` is optional and may be `healthy`, `warning`, or `critical`. If omitted, Flight infers health from `status`.
 
 ### Keyboard shortcuts
 

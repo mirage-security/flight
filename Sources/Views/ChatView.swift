@@ -22,38 +22,48 @@ struct ChatView: View {
 
             Divider()
 
-            if let conv = conversation, conv.searchActive {
-                let matches = SearchScanner.scan(query: conv.searchQuery, sections: conv.sections)
-                SearchBar(
-                    conversation: conv,
-                    matchCount: matches.count,
-                    onNext: { advanceSearch(conv, matches: matches, by: 1) },
-                    onPrev: { advanceSearch(conv, matches: matches, by: -1) },
-                    onClose: { closeSearch(conv) }
-                )
-                Divider()
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    if let conv = conversation, conv.searchActive {
+                        let matches = SearchScanner.scan(query: conv.searchQuery, sections: conv.sections)
+                        SearchBar(
+                            conversation: conv,
+                            matchCount: matches.count,
+                            onNext: { advanceSearch(conv, matches: matches, by: 1) },
+                            onPrev: { advanceSearch(conv, matches: matches, by: -1) },
+                            onClose: { closeSearch(conv) }
+                        )
+                        Divider()
+                    }
+
+                    ChatMessageListView(
+                        state: state,
+                        worktree: worktree
+                    )
+
+                    if conversation?.remoteSessionActive == true {
+                        remoteSessionBar
+                    }
+
+                    if worktree.prNumber != nil {
+                        PRStatusStripView(worktree: worktree, state: state)
+                    }
+
+                    Divider()
+
+                    InputBarView(state: state, worktree: worktree)
+                }
+
+                if worktree.serviceMonitorVisible {
+                    Divider()
+                    ServicesStatusView(state: state, worktree: worktree)
+                        .frame(width: 340)
+                        .background(theme.headerBackground)
+                }
             }
-
-            ChatMessageListView(
-                state: state,
-                worktree: worktree
-            )
-
-            if conversation?.remoteSessionActive == true {
-                remoteSessionBar
-            }
-
-            if worktree.prNumber != nil {
-                PRStatusStripView(worktree: worktree, state: state)
-            }
-
-            Divider()
-
-            InputBarView(state: state, worktree: worktree)
         }
         .background(theme.background)
     }
-
     // MARK: - Tab Bar
 
     private var tabBar: some View {
@@ -197,6 +207,26 @@ struct ChatView: View {
             }
             Spacer()
 
+            Button {
+                Task { await state.refreshServiceMonitor(for: worktree) }
+            } label: {
+                Group {
+                    if worktree.serviceMonitorLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.secondaryText)
+                    }
+                }
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(worktree.serviceMonitorLoading)
+            .tooltip("Refresh services")
+
             if let count = conversation?.messages.count, count > 0 {
                 let textCount = conversation?.messages.filter { $0.role == .user || (!$0.isToolUse && !$0.isToolResult && $0.role == .assistant) }.count ?? 0
                 Text("\(textCount) messages")
@@ -322,6 +352,217 @@ struct ChatView: View {
         return !worktree.path.isEmpty
     }
 
+}
+
+// MARK: - Services Status
+
+private struct ServicesStatusView: View {
+    @Bindable var state: AppState
+    let worktree: Worktree
+    @Environment(\.theme) private var theme
+    private static let refreshIntervalNanoseconds: UInt64 = 10_000_000_000
+
+    private var sortedServices: [ServiceMonitorStatus] {
+        worktree.serviceMonitorItems.sorted { lhs, rhs in
+            let lhsRank = rank(lhs.health)
+            let rhsRank = rank(rhs.health)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private var summaryText: String {
+        let critical = worktree.serviceMonitorItems.filter { $0.health == .critical }.count
+        let warning = worktree.serviceMonitorItems.filter { $0.health == .warning }.count
+        let healthy = worktree.serviceMonitorItems.count - warning - critical
+        var parts: [String] = []
+        if critical > 0 { parts.append("\(critical) critical") }
+        if warning > 0 { parts.append("\(warning) warning") }
+        if healthy > 0 { parts.append("\(healthy) online") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.secondaryText)
+                Text("Services")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.text)
+
+                if !worktree.serviceMonitorItems.isEmpty, worktree.serviceMonitorError == nil {
+                    Text(summaryText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+                }
+
+                if let updatedAt = worktree.serviceMonitorUpdatedAt {
+                    Text("Updated \(updatedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+                }
+
+                Spacer()
+
+                Button {
+                    Task { await state.refreshServiceMonitor(for: worktree) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(worktree.serviceMonitorLoading)
+                .tooltip("Refresh")
+
+                Button {
+                    worktree.serviceMonitorVisible = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(theme.secondaryText)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .tooltip("Hide services")
+            }
+
+            if worktree.serviceMonitorLoading && worktree.serviceMonitorItems.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading services...")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                .padding(.vertical, 4)
+            } else if let error = worktree.serviceMonitorError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.red)
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(2)
+                }
+                .padding(.vertical, 4)
+            } else if worktree.serviceMonitorItems.isEmpty {
+                Text("No services reported.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.secondaryText)
+                    .padding(.vertical, 4)
+            } else {
+                ScrollView(.vertical) {
+                    VStack(spacing: 8) {
+                        ForEach(sortedServices) { service in
+                            ServiceMonitorCard(service: service)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(12)
+        .task(id: worktree.id) {
+            await autoRefresh()
+        }
+    }
+
+    private func autoRefresh() async {
+        await state.refreshServiceMonitor(for: worktree)
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: Self.refreshIntervalNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await state.refreshServiceMonitor(for: worktree)
+        }
+    }
+
+    private func rank(_ health: ServiceMonitorHealth) -> Int {
+        switch health {
+        case .critical: return 0
+        case .warning: return 1
+        case .healthy: return 2
+        }
+    }
+}
+
+private struct ServiceMonitorCard: View, Equatable {
+    let service: ServiceMonitorStatus
+    @Environment(\.theme) private var theme
+
+    static func == (lhs: ServiceMonitorCard, rhs: ServiceMonitorCard) -> Bool {
+        lhs.service == rhs.service
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(healthColor)
+                    .frame(width: 7, height: 7)
+
+                Text(service.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Text(service.healthLabel)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(healthColor)
+                    .lineLimit(1)
+            }
+
+            if !service.metrics.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(Array(service.metrics.prefix(4).enumerated()), id: \.offset) { _, metric in
+                        metricView(metric.label, metric.value)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(healthColor.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(healthColor.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var healthColor: Color {
+        switch service.health {
+        case .healthy: return theme.green
+        case .warning: return theme.yellow
+        case .critical: return theme.red
+        }
+    }
+
+    private func metricView(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(theme.secondaryText)
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.text)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: - Tooltip

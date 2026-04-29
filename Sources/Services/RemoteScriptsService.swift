@@ -5,9 +5,19 @@ enum RemoteLifecycle: String, CaseIterable {
     case connect
     case teardown
     case list
+    case monitor
+
+    var isRequiredForRemoteOnlyFetch: Bool {
+        switch self {
+        case .provision, .connect:
+            return true
+        case .teardown, .list, .monitor:
+            return false
+        }
+    }
 }
 
-struct ResolvedRemoteCommand {
+struct ResolvedRemoteCommand: Sendable {
     /// Shell command string. Executed via `zsh -l -c`. For `.flight/`
     /// scripts this is `"<scriptPath>" "$@"` so the script receives any
     /// trailing args (e.g. the remote command for `connect`). For
@@ -15,7 +25,7 @@ struct ResolvedRemoteCommand {
     let command: String
     /// Environment overrides to layer on top of the process env.
     /// `FLIGHT_BRANCH` for `provision`, `FLIGHT_WORKSPACE` for
-    /// `connect`/`teardown`, empty for `list`.
+    /// `connect`/`teardown`/`monitor`, empty for `list`.
     let environment: [String: String]
     /// Working directory to run in. Always the repo root — so `.flight/`
     /// scripts and settings templates can reference the repo consistently.
@@ -48,6 +58,8 @@ struct ResolvedRemoteCommand {
 ///    positional args when invoking.
 /// - `teardown`: `FLIGHT_WORKSPACE` is set. No `$@`.
 /// - `list`: no env vars, no `$@`. Prints one workspace name per line.
+/// - `monitor`: `FLIGHT_WORKSPACE` is set for remote worktrees. Prints a
+///    JSON service monitor payload.
 enum RemoteScriptsService {
     static func resolve(
         _ lifecycle: RemoteLifecycle,
@@ -111,8 +123,9 @@ enum RemoteScriptsService {
         return flightScriptPath(lifecycle, project: project) != nil
     }
 
-    static func hasAnyScript(project: Project) -> Bool {
-        RemoteLifecycle.allCases.contains { isAvailable($0, project: project) }
+    static func hasRequiredRemoteScripts(project: Project) -> Bool {
+        isAvailable(.provision, project: project)
+            && isAvailable(.connect, project: project)
     }
 
     /// True when a `.flight/<lifecycle>` file exists in the repo, regardless
@@ -148,7 +161,7 @@ enum RemoteScriptsService {
         switch lifecycle {
         case .provision:
             if let branch { env["FLIGHT_BRANCH"] = branch }
-        case .connect, .teardown:
+        case .connect, .teardown, .monitor:
             if let workspace { env["FLIGHT_WORKSPACE"] = workspace }
         case .list:
             break
@@ -167,6 +180,7 @@ enum RemoteScriptsService {
         case .connect:   value = remote.connect
         case .teardown:  value = remote.teardown
         case .list:      value = remote.list
+        case .monitor:   value = remote.monitor
         }
         guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
             return nil
