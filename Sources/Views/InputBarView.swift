@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ImageAttachment: Identifiable {
     let id = UUID()
@@ -18,6 +19,7 @@ struct InputBarView: View {
     @State private var slashMenuKeyboardNonce: Int = 0
     @State private var slashMenuDismissed: Bool = false
     @State private var inputController = PasteableTextViewController()
+    @State private var pasteEventMonitor: Any?
 
     private var conversation: Conversation? {
         worktree.activeConversation
@@ -150,7 +152,13 @@ struct InputBarView: View {
         }
         .background(theme.headerBackground)
         .onChange(of: messageText) { _, _ in updateSlashMenu() }
-        .onAppear { updateSlashMenu() }
+        .onAppear {
+            updateSlashMenu()
+            installPasteEventMonitor()
+        }
+        .onDisappear {
+            removePasteEventMonitor()
+        }
     }
 
     // MARK: - Slash command menu
@@ -395,5 +403,34 @@ struct InputBarView: View {
         let message = text.isEmpty ? "What's in this image?" : text
 
         state.sendMessage(message, images: images, to: worktree, conversation: conversation)
+    }
+
+    private func installPasteEventMonitor() {
+        guard pasteEventMonitor == nil else { return }
+        pasteEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard ImagePasteTextView.isPasteShortcut(event),
+                  !isRemoteSessionActive,
+                  let textView = inputController.textView,
+                  textView.window === NSApp.keyWindow else {
+                return event
+            }
+
+            if let firstResponder = NSApp.keyWindow?.firstResponder as? NSTextView,
+               firstResponder !== textView {
+                return event
+            }
+
+            guard let attachment = PasteboardImageExtractor.imageAttachment(from: .general) else {
+                return event
+            }
+            attachedImages.append(ImageAttachment(image: attachment.image, pngData: attachment.pngData))
+            return nil
+        }
+    }
+
+    private func removePasteEventMonitor() {
+        guard let pasteEventMonitor else { return }
+        NSEvent.removeMonitor(pasteEventMonitor)
+        self.pasteEventMonitor = nil
     }
 }

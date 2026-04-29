@@ -113,7 +113,7 @@ Unknown keys are silently ignored, so adding new ones is forward-compatible. Mis
 5. Runs `provision` with `FLIGHT_BRANCH` set, streaming output to the provisioning log group in the chat.
 6. `FLIGHT_OUTPUT` lines are captured and applied to the worktree.
 7. The last non-metadata line is captured as the workspace name.
-8. Flight calls `startAgent` which builds the remote invocation: `zsh -l -c '<connect command>' _ '<claude invocation>'`.
+8. Flight calls `startAgent` which builds the remote invocation: `zsh -l -c '<connect command>' _ '<claude invocation>'`. Text-only turns pass the prompt as an argument; turns with image attachments embed a base64 JSON payload in the remote command, decode it to temporary PNG files on the remote, and pass those paths in the prompt.
 9. First turn sends the initial prompt. A notification fires when the first response arrives.
 
 ### 2. Attach to existing workspace (Cmd+Shift+N → pick project → select workspace)

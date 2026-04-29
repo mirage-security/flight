@@ -208,7 +208,7 @@ Each user message spawns a new `claude -p` process with `--output-format stream-
 
 **Local**: Process runs directly with the sandbox enabled (filesystem scoped to the worktree, `dangerouslyDisableSandbox` overrides denied).
 
-**Remote**: Flight invokes `zsh -l -c '<connect command>' _ '<remote claude invocation>'` with `FLIGHT_WORKSPACE` set in the environment. Your `.flight/connect` script receives the claude invocation as `"$@"` and SSHes it to the remote workspace. The initial prompt is base64-encoded through a temp file on the remote for safe shell transport. Remote agents run with `--dangerously-skip-permissions` since the workspace is its own isolation boundary.
+**Remote**: Flight invokes `zsh -l -c '<connect command>' _ '<remote claude invocation>'` with `FLIGHT_WORKSPACE` set in the environment. Your `.flight/connect` script receives the claude invocation as `"$@"` and SSHes it to the remote workspace. Text-only prompts are base64-encoded through a temp file on the remote for safe shell transport; image turns embed a base64 JSON payload in the remote command, decode it to temporary PNG files on the remote, then prompt Claude with those file paths so it can inspect them through its normal image-aware `Read` path. Remote agents run with `--dangerously-skip-permissions` since the workspace is its own isolation boundary.
 
 ### Data storage
 

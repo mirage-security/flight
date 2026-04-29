@@ -148,23 +148,22 @@ final class ImagePasteTextView: NSTextView {
     var onMenuCancel: () -> Void = { }
 
     override func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
-        let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
-
-        // Check for image data on the pasteboard
-        if let bestType = pasteboard.availableType(from: imageTypes),
-           let imageData = pasteboard.data(forType: bestType) {
-            // Convert to PNG
-            if let bitmap = NSBitmapImageRep(data: imageData),
-               let pngData = bitmap.representation(using: .png, properties: [:]),
-               let image = NSImage(data: pngData) {
-                onImagePaste?(image, pngData)
-                return
-            }
+        if let attachment = PasteboardImageExtractor.imageAttachment(from: .general) {
+            onImagePaste?(attachment.image, attachment.pngData)
+            return
         }
 
         // Fall through to default text paste
         super.paste(sender)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.isPasteShortcut(event),
+           PasteboardImageExtractor.imageAttachment(from: .general) != nil {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -207,5 +206,98 @@ final class ImagePasteTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    static func isPasteShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return flags == .command && event.charactersIgnoringModifiers?.lowercased() == "v"
+    }
+}
+
+enum PasteboardImageExtractor {
+    private static let pngDataTypes: Set<NSPasteboard.PasteboardType> = [
+        .png,
+        NSPasteboard.PasteboardType("Apple PNG pasteboard type"),
+    ]
+
+    private static let imageDataTypes: [NSPasteboard.PasteboardType] = [
+        .png,
+        NSPasteboard.PasteboardType("Apple PNG pasteboard type"),
+        .tiff,
+        NSPasteboard.PasteboardType("NeXT TIFF v4.0 pasteboard type"),
+        NSPasteboard.PasteboardType("public.image"),
+    ]
+
+    static func imageAttachment(from pasteboard: NSPasteboard) -> (image: NSImage, pngData: Data)? {
+        if let direct = imageFromDirectData(on: pasteboard) {
+            return direct
+        }
+        if let image = imageFromObjects(on: pasteboard),
+           let pngData = pngData(for: image),
+           let normalized = NSImage(data: pngData) {
+            return (normalized, pngData)
+        }
+        if let image = imageFromFileURL(on: pasteboard),
+           let pngData = pngData(for: image),
+           let normalized = NSImage(data: pngData) {
+            return (normalized, pngData)
+        }
+        return nil
+    }
+
+    private static func imageFromDirectData(on pasteboard: NSPasteboard) -> (image: NSImage, pngData: Data)? {
+        for type in imageDataTypes {
+            guard let data = pasteboard.data(forType: type) else { continue }
+            if pngDataTypes.contains(type), let image = NSImage(data: data) {
+                return (image, data)
+            }
+            if let result = imageFromData(data) {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private static func imageFromData(_ data: Data) -> (image: NSImage, pngData: Data)? {
+        if let bitmap = NSBitmapImageRep(data: data),
+           let pngData = bitmap.representation(using: .png, properties: [:]),
+           let image = NSImage(data: pngData) {
+            return (image, pngData)
+        }
+        guard let image = NSImage(data: data),
+              let pngData = pngData(for: image),
+              let normalized = NSImage(data: pngData) else {
+            return nil
+        }
+        return (normalized, pngData)
+    }
+
+    private static func imageFromObjects(on pasteboard: NSPasteboard) -> NSImage? {
+        let objects = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)
+        return objects?.compactMap { $0 as? NSImage }.first
+    }
+
+    private static func imageFromFileURL(on pasteboard: NSPasteboard) -> NSImage? {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        guard let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: options) else {
+            return nil
+        }
+        for object in objects {
+            guard let url = object as? URL else { continue }
+            if let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    private static func pngData(for image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else {
+            return nil
+        }
+        return bitmap.representation(using: .png, properties: [:])
     }
 }
