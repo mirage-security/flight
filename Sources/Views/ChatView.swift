@@ -12,6 +12,16 @@ struct ChatView: View {
     }
 
     var body: some View {
+        HSplitView {
+            chatColumn
+            if worktree.panelPaneVisible, worktree.panelRunner != nil {
+                PanelPaneView(state: state, worktree: worktree)
+            }
+        }
+        .background(theme.background)
+    }
+
+    private var chatColumn: some View {
         VStack(spacing: 0) {
             chatHeader
                 .background(theme.headerBackground)
@@ -204,6 +214,19 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .tooltip("Export conversation as JSONL")
+            }
+            if state.panelScriptPath(for: worktree) != nil {
+                Button {
+                    state.togglePanelPane(for: worktree)
+                } label: {
+                    Image(systemName: worktree.panelPaneVisible ? "sidebar.right" : "sidebar.right")
+                        .font(.system(size: 12))
+                        .foregroundStyle(worktree.panelPaneVisible ? theme.accent : theme.secondaryText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .tooltip(worktree.panelPaneVisible ? "Hide panel" : "Show panel")
             }
             Spacer()
 

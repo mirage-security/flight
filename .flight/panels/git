@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Example panel for Flight: shows the worktree's git state — current branch,
+# modified files, recent commits — refreshed every 2 seconds.
+#
+# This is the "hello world" panel: drop a similarly-shaped script in
+# `.flight/panels/<name>` and it shows up in the right pane. Protocol spec:
+# doc/features/panels.md.
+#
+# Requires `jq` on PATH. Flight inherits the user's login-shell PATH so
+# Homebrew installs work out of the box.
+set -u
+
+emit() { printf '%s\n' "$1"; }
+
+emit '{"op":"title","text":"Git"}'
+
+# Each `git status --porcelain` line looks like "XY path", where XY is the
+# two-character status code. Convert into row nodes with status colors.
+modified_rows() {
+  git status --porcelain 2>/dev/null | jq -Rsc '
+    split("\n") | map(select(length > 0)) | map(
+      .[0:2] as $code | .[3:] as $path | {
+        type: "row",
+        title: $path,
+        subtitle: (
+          if   $code == "??"        then "untracked"
+          elif ($code|test("^U"))   then "conflict"
+          elif ($code|test("^A"))   then "added"
+          elif ($code|test("^D"))   then "deleted"
+          elif ($code|test("^R"))   then "renamed"
+          elif ($code|test("M"))    then "modified"
+          else "changed"
+          end
+        ),
+        status: (
+          if   ($code|test("U"))  then "error"
+          elif $code == "??"      then "gray"
+          else "warn"
+          end
+        )
+      }
+    )
+  '
+}
+
+log_rows() {
+  git log -5 --pretty=format:'%s%x09%ar' 2>/dev/null | jq -Rsc '
+    split("\n") | map(select(length > 0)) | map(
+      split("\t") | { type: "row", title: .[0], subtitle: .[1] }
+    )
+  '
+}
+
+while true; do
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "(detached)")
+  modified=$(modified_rows)
+  recent=$(log_rows)
+
+  tree=$(jq -cn \
+    --arg branch "$branch" \
+    --argjson modified "${modified:-[]}" \
+    --argjson recent "${recent:-[]}" \
+    '{
+      type: "section",
+      children: [
+        { type: "section", title: ("on " + $branch), children: $modified },
+        { type: "section", title: "recent commits",  children: $recent   }
+      ]
+    }')
+  emit "{\"op\":\"replace\",\"tree\":$tree}"
+  sleep 2
+done
