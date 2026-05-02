@@ -27,7 +27,7 @@ let package = Package(
                 .product(name: "Textual", package: "textual"),
             ],
             path: "Sources",
-            exclude: ["FlightBench", "FlightCore", "FlightExecutable"],
+            exclude: ["FlightBench", "FlightCore", "FlightExecutable", "FlightLeakCheck"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
@@ -43,6 +43,17 @@ let package = Package(
             name: "FlightBench",
             dependencies: ["FlightCore"],
             path: "Sources/FlightBench",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Out-of-process leak harness for `ShellService`. XCTest's harness
+        // adds enough timing noise (Task.detached reaping, dispatch source
+        // teardown, killed-xctest zombie reparenting) that an FD-counting
+        // test inside `swift test` is flaky. This binary spawns subprocesses
+        // through the real ShellService and prints the FD-count delta;
+        // `Scripts/leak-check.sh` runs it and fails the build on regression.
+        .executableTarget(
+            name: "FlightLeakCheck",
+            path: "Sources/FlightLeakCheck",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

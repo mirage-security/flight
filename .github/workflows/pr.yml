@@ -30,6 +30,9 @@ jobs:
       - name: Run tests
         run: swift test
 
+      - name: Subprocess FD leak check
+        run: Scripts/leak-check.sh
+
       - name: Run benchmarks
         continue-on-error: true
         run: swift run -c release FlightBench

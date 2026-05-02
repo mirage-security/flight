@@ -154,6 +154,12 @@ final class ClaudeAgent {
             process.terminationHandler = nil
             process.terminate()
         }
+        // Foundation keeps Pipe FileHandles alive past their local scope
+        // through the dead Process. Without these explicit closes every
+        // turn leaks the read ends — a streaming session piles up FDs
+        // until `Process.run()` starts failing with EBADF.
+        try? stdoutPipe?.fileHandleForReading.close()
+        try? stderrPipe?.fileHandleForReading.close()
         readTask = nil
         stderrReadTask = nil
         process = nil
