@@ -28,7 +28,7 @@ jobs:
         run: swift build --target FlightBench
 
       - name: Run tests
-        run: swift test
+        run: ./test.sh
 
       - name: Run benchmarks
         continue-on-error: true

@@ -60,8 +60,15 @@ enum ShellService {
 
         return try await withCheckedThrowingContinuation { continuation in
             process.terminationHandler = { _ in
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let stdoutFH = stdoutPipe.fileHandleForReading
+                let stderrFH = stderrPipe.fileHandleForReading
+                let stdoutData = stdoutFH.readDataToEndOfFile()
+                let stderrData = stderrFH.readDataToEndOfFile()
+                // Without these explicit closes the read ends linger past
+                // the Pipe going out of scope — Foundation keeps them alive
+                // through the dead Process — and every spawn leaks one FD.
+                try? stdoutFH.close()
+                try? stderrFH.close()
                 let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
@@ -147,8 +154,17 @@ enum ShellService {
 
                     process.waitUntilExit()
 
+                    let stderrFH = stderrPipe.fileHandleForReading
+                    let stderrData = process.terminationStatus != 0
+                        ? stderrFH.readDataToEndOfFile()
+                        : Data()
+                    // Foundation keeps the read ends alive past the Pipe's
+                    // local scope through the dead Process, so we close them
+                    // explicitly. Without this every spawn leaks one FD.
+                    try? fileHandle.close()
+                    try? stderrFH.close()
+
                     if process.terminationStatus != 0 {
-                        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
                         continuation.resume(throwing: ShellError.failed(
                             command: command,
@@ -232,6 +248,10 @@ enum ShellService {
                     }
 
                     process.waitUntilExit()
+                    // Foundation keeps the read end alive past the Pipe's
+                    // local scope through the dead Process, so we close it
+                    // explicitly. Without this every spawn leaks one FD.
+                    try? fileHandle.close()
 
                     if process.terminationStatus != 0 {
                         continuation.resume(throwing: ShellError.failed(
